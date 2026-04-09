@@ -5,13 +5,19 @@
 If someone in the lab only wants to import the model class in their own code, this package is enough:
 
 ```bash
-pip install "git+ssh://git@github.com/<org>/glmhmmt.git"
+pip install "git+https://github.com/BrainCircuitsBehaviorLab/glmhmmt.git"
 ```
 
 or with `uv`:
 
 ```bash
-uv pip install "git+ssh://git@github.com/<org>/glmhmmt.git"
+uv pip install "git+https://github.com/BrainCircuitsBehaviorLab/glmhmmt.git"
+```
+
+If they want to add it as a dependency in another `uv` project:
+
+```bash
+uv add "glmhmmt @ git+https://github.com/BrainCircuitsBehaviorLab/glmhmmt.git"
 ```
 
 Then in Python:
@@ -30,15 +36,15 @@ from glmhmmt import fit_glm
 
 See [`examples/use_softmax_glmhmm.py`](examples/use_softmax_glmhmm.py) for a minimal example that builds the model directly from arrays, without any task adapter.
 
-For the baseline GLM fitter, see [`examples/fit_glm_with_lapses.py`](examples/fit_glm_with_lapses.py). That is the right interface for someone who already has their own `X` and `y`.
+For a baseline GLM example, see [`examples/glm_lapses/example.py`](examples/glm_lapses/example.py).
 
 The package root uses lazy imports, so importing `SoftmaxGLMHMM` does not require task adapters.
 
-The CLI entrypoints under `glmhmmt.cli.*` are repo-oriented wrappers around task adapters, runtime paths, and result directories. They are useful for command-line workflows, but they are not the recommended import interface for another project.
+The CLI entrypoints under `glmhmmt.cli.*` are wrappers around task adapters, runtime paths, and result directories. They are useful for command-line workflows, but they are not the recommended import interface for another project.
 
 ## Task Adapters Are Optional
 
-The thesis repo keeps editable task adapters in `code/tasks`, but they are not required when someone only wants the core model class.
+This package does not need task adapters when someone only wants the reusable model classes and fitting utilities.
 
 If a user wants task-aware CLIs or notebooks, they can provide adapters in either of these ways:
 
@@ -56,40 +62,30 @@ my_lab_task = "my_lab_glmhmmt.task:MyLabTaskAdapter"
 
 For lab use, the simplest setup is:
 
-1. Put `code/glmhmmt` in its own Git repo.
-2. Keep that repo focused on the reusable package only.
-3. Let people install it straight from Git.
+1. Keep `glmhmmt` in its own Git repo.
+2. Keep task adapters in a separate companion repo.
+3. Install both from Git or from local editable paths during development.
 
 That is usually better than publishing to PyPI immediately, because:
 
-- it avoids exposing the rest of the thesis repo
+- it avoids exposing unrelated analysis code
 - updates are simple
 - private sharing inside the lab is easy
 
 Publish to PyPI later only if you want a public, versioned release.
 
-## Local Development In This Thesis Repo
+## Local Development
 
-For work inside this thesis repository:
+For work inside this repository:
 
 ```bash
-cd code
 uv sync
 uv run python -c "from glmhmmt import SoftmaxGLMHMM; print(SoftmaxGLMHMM)"
 ```
 
-If you want the marimo notebooks too:
+If you want the notebook extras too:
 
 ```bash
-cd code
-uv sync --extra notebooks
-uv run marimo edit notebooks/glmhmmt_analysis.py
-```
-
-If you specifically want to work on `glmhmmt` as a standalone package project:
-
-```bash
-cd code/glmhmmt
 uv sync --extra notebooks
 ```
 
