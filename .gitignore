@@ -1,0 +1,5 @@
+.DS_Store
+.uv-cache/
+.venv/
+__pycache__/
+dist/

@@ -1,0 +1,71 @@
+[project]
+name = "glmhmmt"
+version = "0.1.0"
+description = "GLM-HMM and GLM-HMMT tooling for behavioural task analysis."
+readme = "README.md"
+authors = [
+    { name = "Javi", email = "jrm2003@icloud.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "anywidget>=0.9.21",
+    "dynamax>=1.0.1",
+    "ipython>=9.10.1",
+    "jax>=0.9.0.1",
+    "jaxtyping>=0.3.7",
+    "marimo>=0.21.1",
+    "matplotlib>=3.10.8",
+    "nbformat>=5.10.4",
+    "numba>=0.63.0",
+    "numpy>=2.3.5",
+    "optax>=0.2.7",
+    "pandas>=3.0.0",
+    "plotly>=6.5.2",
+    "polars>=1.38.1",
+    "pyarrow>=23.0.1",
+    "scipy>=1.17.1",
+    "seaborn>=0.13.2",
+    "tfp-nightly==0.26.0.dev20260205",
+    "wigglystuff>=0.3.1",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "anywidget==0.9.21",
+    "marimo>=0.21.1",
+    "plotly==6.5.2",
+    "scikit-learn==1.8.0",
+    "sbi==0.25.0",
+    "torch==2.5.1",
+    "traitlets==5.14.3",
+    "wigglystuff==0.3.1",
+]
+
+[project.scripts]
+glmhmmt-fit-glm = "glmhmmt.cli.fit_glm:main"
+glmhmmt-fit-glmhmm = "glmhmmt.cli.fit_glmhmm:main"
+glmhmmt-fit-glmhmmt = "glmhmmt.cli.fit_glmhmmt:main"
+glmhmmt-fit-tau-sweep = "glmhmmt.cli.fit_tau_sweep:main"
+
+[tool.uv]
+# Exclude the stable distribution pulled transitively by Dynamax so the
+# `tensorflow_probability` import path comes from `tfp-nightly`.
+exclude-dependencies = ["tensorflow-probability"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glmhmmt"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "config.toml",
+    "src/glmhmmt/**",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.marimo.runtime]
+output_max_bytes = 100_000_000

@@ -1,0 +1,66 @@
+.save-figure-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  --save-figure-radius: 8px;
+  --save-figure-padding-y: 0.45rem;
+  --save-figure-padding-x: 0.9rem;
+  --save-figure-font-size: 0.9rem;
+  --save-figure-light-border: rgba(107, 114, 128, 0.35);
+  --save-figure-light-background: rgba(249, 250, 251, 0.95);
+  --save-figure-light-text: #111827;
+  --save-figure-light-hover-background: rgba(243, 244, 246, 1);
+  --save-figure-light-hover-border: rgba(107, 114, 128, 0.55);
+  --save-figure-light-disabled-background: rgba(229, 231, 235, 0.9);
+  --save-figure-light-disabled-border: rgba(156, 163, 175, 0.35);
+  --save-figure-dark-border: rgba(156, 163, 175, 0.35);
+  --save-figure-dark-background: rgba(31, 41, 55, 0.95);
+  --save-figure-dark-text: #f3f4f6;
+  --save-figure-dark-hover-background: rgba(55, 65, 81, 1);
+  --save-figure-dark-hover-border: rgba(209, 213, 219, 0.45);
+  --save-figure-dark-disabled-background: rgba(55, 65, 81, 0.8);
+  --save-figure-dark-disabled-border: rgba(107, 114, 128, 0.35);
+}
+
+.save-figure-btn {
+  border: 1px solid var(--save-figure-light-border);
+  background: var(--save-figure-light-background);
+  color: var(--save-figure-light-text);
+  border-radius: var(--save-figure-radius);
+  padding: var(--save-figure-padding-y) var(--save-figure-padding-x);
+  font-size: var(--save-figure-font-size);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.save-figure-btn:hover {
+  background: var(--save-figure-light-hover-background);
+  border-color: var(--save-figure-light-hover-border);
+}
+
+.save-figure-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--save-figure-light-disabled-background);
+  border-color: var(--save-figure-light-disabled-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  .save-figure-btn {
+    background: var(--save-figure-dark-background);
+    color: var(--save-figure-dark-text);
+    border-color: var(--save-figure-dark-border);
+  }
+
+  .save-figure-btn:hover {
+    background: var(--save-figure-dark-hover-background);
+    border-color: var(--save-figure-dark-hover-border);
+  }
+
+  .save-figure-btn:disabled {
+    background: var(--save-figure-dark-disabled-background);
+    border-color: var(--save-figure-dark-disabled-border);
+  }
+}

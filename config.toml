@@ -1,0 +1,11 @@
+# Project-local overrides for editable installs from the thesis repo.
+# Any non-[paths] settings here override the packaged defaults in
+# src/glmhmmt/resources/default_config.toml.
+
+[paths]
+data_dir = "../../data"
+results_dir = "../results"
+alexis_dir = "../../data/Alexis"
+
+[plugins]
+task_paths = ["../tasks"]

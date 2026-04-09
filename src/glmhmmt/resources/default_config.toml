@@ -1,0 +1,294 @@
+[project]
+name = "glm-hmm"
+seed = 12345
+
+[model]
+num_states = 2
+num_classes = 3
+tau = 50
+
+# See SoftmaxGLMHMM and SoftmaxGLMHMMEmissions docstrings for full API docs.
+[glmhmm]
+# Ordered emission feature names — index = column index in W (K × C-1 × M).
+# Must match emission_cols passed through the task adapter design-matrix build.
+emission_features = [
+    "biasL", "biasR",
+    "onsetL", "onsetC", "onsetR",
+    "delay",
+    "DR", "DL",
+    "SL", "SC", "SR",
+    "SLxdelay", "SCxdelay", "SRxdelay",
+    "A_L", "A_R",
+]
+transition_features = ["A_plus", "A_minus", "A_L", "A_C", "A_R"]
+
+# Per-state weight constraints: {state_idx (str): {feature_name = value}}.
+# Keys are string integers; converted to int in fit scripts.
+# Leave empty to train all weights freely.
+# Example: "0" = {SL = 0.0, SC = 0.0, SR = 0.0}  → state 0 is bias-only
+[glmhmm.frozen_emissions]
+# "0" = {SL = 0.0, SC = 0.0, SR = 0.0}
+
+[encoding.stimd]
+0 = "SIL"
+1 = "SS"
+2 = "SM"
+3 = "SL"
+4 = "VG"
+
+[encoding.ttype]
+0 = "VG"
+1 = "DS"
+2 = "DM"
+3 = "DL"
+
+[encoding.side]
+0 = "L"
+1 = "C"
+2 = "R"
+
+[plots]
+dpi = 300
+save_format = "png"
+style = "white"
+context = "talk"
+font_scale = 1
+grid_alpha = 0.3
+figsize_small = [
+    6,
+    3,
+]
+figsize_medium = [
+    10,
+    4,
+]
+figsize_large = [
+    12,
+    5,
+]
+heatmap_cmap = "viridis"
+weights_cmap = "RdBu_r"
+
+[widgets.save_figure]
+default_label = "Save"
+save_all_label = "Save all model plots"
+empty_title = "No plots available"
+empty_detail = "Render the notebook plots first."
+saved_title = "Saved"
+saved_many_title = "Saved {count} plots"
+saved_error_title = "Saved with errors"
+failed_title = "Could not save plots"
+toast_detail_color = "#6b7280"
+radius = "8px"
+padding_y = "0.45rem"
+padding_x = "0.9rem"
+font_size = "0.9rem"
+light_border = "rgba(107, 114, 128, 0.35)"
+light_background = "rgba(249, 250, 251, 0.95)"
+light_text = "#111827"
+light_hover_background = "rgba(243, 244, 246, 1)"
+light_hover_border = "rgba(107, 114, 128, 0.55)"
+light_disabled_background = "rgba(229, 231, 235, 0.9)"
+light_disabled_border = "rgba(156, 163, 175, 0.35)"
+dark_border = "rgba(156, 163, 175, 0.35)"
+dark_background = "rgba(31, 41, 55, 0.95)"
+dark_text = "#f3f4f6"
+dark_hover_background = "rgba(55, 65, 81, 1)"
+dark_hover_border = "rgba(209, 213, 219, 0.45)"
+dark_disabled_background = "rgba(55, 65, 81, 0.8)"
+dark_disabled_border = "rgba(107, 114, 128, 0.35)"
+
+[plots.ttype]
+order = [
+    "VG",
+    "DS",
+    "DM",
+    "DL",
+]
+labels = [
+    "Visual",
+    "Easy",
+    "Medium",
+    "Hard",
+]
+palette = [
+    "#230027",
+    "#C88FEC",
+    "#9C69A3",
+    "#C698CB",
+]
+
+[plots.stimd]
+order = [
+    "SS",
+    "SM",
+    "SL",
+]
+labels = [
+    "Short",
+    "Med",
+    "Long",
+]
+palette = [
+    "#FFB74D",
+    "#FB8C00",
+    "#EF6C00",
+]
+
+[plots.delay]
+order = [
+    "DS",
+    "DM",
+    "DL",
+]
+labels = [
+    "Short",
+    "Med",
+    "Long",
+]
+palette = [
+    "#5E2A7E",
+    "#9C69A3",
+    "#C698CB",
+]
+
+[palettes]
+states_palette = "Dark2"
+states_palette_n = 3
+# Optional exact-K overrides. If defined with enough colours, these are used
+# for 2-state or 3-state plots respectively; all other K fall back to
+# `states_hex`.
+states_hex_k2 = [
+    "#2BA02B",   # Engaged
+    "#7f7f7f",   # Disengaged
+]
+states_hex_k3 = [
+    "#2BA02B",   # Engaged
+    "#1F77B4",
+    "#FF7F0F",
+    # "#E7298A",   # Left disengaged / left bias
+    # "#7570B3",   # Right disengaged / right bias
+]
+# Colours indexed by canonical rank: 0=Engaged, 1=Disengaged, 2=Disengaged 1, …
+# All state-plots fall back to this rank-indexed list when no exact-K override
+# is defined above.
+states_hex = [
+    "#1B9E77",   # rank 0 – Engaged
+    "#7f7f7f",   # rank 1 – Disengaged
+    "#D95F02",   # rank 1 – Disengaged
+    "#7570B3",   # rank 2 – Disengaged 1
+    "#E7298A",   # rank 3 – Disengaged 2
+    "#66A61E",   # rank 4 – Disengaged 3
+    "#E6AB02",   # rank 5 – Disengaged 4
+]
+
+[labels]
+sL = "$s_L$"
+sC = "$s_C$"
+sR = "$s_R$"
+noise_amp = "$\\sigma$"
+S_amplitude = "$S^{amp}$"
+S_d = "$S^d$"
+U_int_amplitude = "$U_{int}^{amp}$"
+U_int_baseline = "$U_{int}^{baseline}$"
+U_int_onset = "$U_{int}^{onset}$"
+U_ext_amplitude = "$U_{ext}^{amp}$"
+rel_vs_ceiling_bal = "Goodness of fit"
+nll_trial = "NLL / trial"
+
+[colors.parameters]
+sL = "#66C2A5"
+sC = "#FC8D62"
+sR = "#8DA0CB"
+U_int_amplitude = "#C38DFF"
+U_int_baseline = "#C38DFF"
+U_int_onset = "#C38DFF"
+S_amplitude = "#FFA64C"
+S_d = "#FFA64C"
+U_ext_amplitude = "#3385FF"
+noise_amp = "#999999"
+nll_trial = "#999999"
+rel_vs_ceiling_bal = "#999999"
+
+[colors.models]
+spatialU_notrandom = "#1f77b4"
+spatialU = "#ff7f0e"
+temporalU = "#2ca02c"
+spatial_reduced2 = "#9467bd"
+spatial_reduced_cert = "#8c564b"
+spatial_reduced3 = "#e377c2"
+spatial_reduced3_randomx0 = "#e377c2"
+externalU = "#7f7f7f"
+externalU2 = "#17becf"
+externalU2_randomx0 = "#0053CE"
+
+[model_names]
+spatialU_notrandom = "Spatial U (fixed $x_0$)"
+spatialU = "Spatial U"
+temporalU = "Temporal U"
+spatial_reduced_cert = "Spatial U (reduced)"
+spatial_reduced2 = "Spatial U (reduced 2)"
+spatial_reduced3 = "Spatial U (reduced 3)"
+externalU = "External U"
+externalU2_randomx0 = "External U (random $x_0$)"
+externalU2 = "External U comparable"
+
+[parameters]
+temporal = [
+    "sL",
+    "sC",
+    "sR",
+    "noise_amp",
+    "S_amplitude",
+    "S_d",
+    "U_int_amplitude",
+    "U_int_baseline",
+    "U_int_onset",
+    "U_ext_amplitude",
+]
+spatial = [
+    "sL",
+    "sC",
+    "sR",
+    "noise_amp",
+    "S_amplitude",
+    "S_d",
+    "U_int_amplitude",
+    "U_int_baseline",
+    "U_ext_amplitude",
+]
+spatial_reduced = [
+    "sL",
+    "sC",
+    "sR",
+    "S_amplitude",
+    "S_d",
+    "U_int_amplitude",
+]
+spatial_reduced2 = [
+    "sL",
+    "sR",
+    "S_amplitude",
+    "S_d",
+    "U_int_amplitude",
+    # "U_int_baseline",
+]
+
+[pretty_names]
+spatial_reduced2 = [
+    "$s_L$",
+    "$s_R$",
+    "$S_{amp}$",
+    "$S_d$",
+    "$U_{amp}$",
+]
+
+[parameter_sets]
+spatialU_notrandom = "spatial"
+spatialU = "spatial"
+temporalU = "temporal"
+spatial_reduced_cert = "spatial_reduced"
+spatial_reduced2 = "spatial_reduced"
+spatial_reduced3 = "spatial_reduced2"
+externalU2_randomx0 = "spatial"
+externalU2 = "spatial"
