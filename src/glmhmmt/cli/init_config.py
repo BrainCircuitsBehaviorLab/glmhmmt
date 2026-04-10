@@ -21,11 +21,11 @@ def main() -> None:
     parser.add_argument("--data-dir", type=str, default=None, help="Data directory to write into [paths].")
     parser.add_argument("--results-dir", type=str, default=None, help="Results directory to write into [paths].")
     parser.add_argument(
-        "--task-path",
-        dest="task_paths",
+        "--adapter-path",
+        dest="adapter_paths",
         action="append",
         default=None,
-        help="Optional local tasks package root. Repeat the flag to add more than one path.",
+        help="Optional local adapters package root. Repeat the flag to add more than one path.",
     )
     parser.add_argument(
         "--force",
@@ -39,7 +39,7 @@ def main() -> None:
         force=args.force,
         data_dir=args.data_dir,
         results_dir=args.results_dir,
-        task_paths=args.task_paths,
+        adapter_paths=args.adapter_paths,
     )
     print(f"Wrote glmhmmt config to {target}")
 

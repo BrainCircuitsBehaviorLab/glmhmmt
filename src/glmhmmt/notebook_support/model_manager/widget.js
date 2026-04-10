@@ -436,6 +436,7 @@ function render({ model, el }) {
     const modelType        = model.get("model_type");
     const currentTask      = model.get("task");
     const taskOptions      = model.get("task_options") || [];
+    const taskDiscoveryMessage = model.get("task_discovery_message") || "";
     const mode             = model.get("ui_mode");
     const KList            = model.get("k_options");
     const currentK         = model.get("K");
@@ -478,18 +479,33 @@ function render({ model, el }) {
             <div class="mm-task-selector">
               <label class="mm-label inline">Task:</label>
               <select id="inp-task" class="mm-input small">
-                ${taskOptions.map(opt => `
+                ${taskOptions.length
+                  ? taskOptions.map(opt => `
                   <option value="${opt.value}" ${currentTask === opt.value ? "selected" : ""}>${opt.label}</option>
-                `).join("")}
+                `).join("")
+                  : '<option value="" selected>No adapters found</option>'}
               </select>
             </div>
           </div>
+        ${taskOptions.length ? `
         <div class="mm-tabs">
           <button class="mm-tab ${mode === 'new'  ? 'active' : ''}" data-mode="new">New Fit</button>
           <button class="mm-tab ${mode === 'load' ? 'active' : ''}" data-mode="load">Load Existing</button>
         </div>
+        <div class="mm-content">` : `
         <div class="mm-content">
+          <div class="mm-empty-note">${taskDiscoveryMessage || "No task adapters were found in the configured adapter folders."}</div>
+        `} 
     `;
+
+    if (!taskOptions.length) {
+      html += `
+        </div>
+      </div>
+      `;
+      el.innerHTML = html;
+      return;
+    }
 
     // ── Load Existing tab ───────────────────────────────────────────────────
     if (mode === "load") {

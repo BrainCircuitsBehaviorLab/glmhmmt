@@ -137,7 +137,7 @@ def _render_project_config(
     *,
     data_dir: str | Path,
     results_dir: str | Path,
-    task_paths: list[str | Path] | None = None,
+    adapter_paths: list[str | Path] | None = None,
 ) -> str:
     lines = [
         "# Project-local overrides for glmhmmt.",
@@ -149,13 +149,13 @@ def _render_project_config(
         f'data_dir = "{_serialize_path(data_dir)}"',
         f'results_dir = "{_serialize_path(results_dir)}"',
     ]
-    if task_paths:
+    if adapter_paths:
         lines.extend(
             [
                 "",
                 "[plugins]",
-                "task_paths = [",
-                *[f'    "{_serialize_path(path)}",' for path in task_paths],
+                "adapter_paths = [",
+                *[f'    "{_serialize_path(path)}",' for path in adapter_paths],
                 "]",
             ]
         )
@@ -165,7 +165,7 @@ def _render_project_config(
                 "",
                 "[plugins]",
                 "# Optional local task packages. Prefer installed entry points when possible.",
-                '# task_paths = ["/absolute/path/to/tasks"]',
+                '# adapter_paths = ["/absolute/path/to/adapters"]',
             ]
         )
     lines.append("")
@@ -178,7 +178,7 @@ def init_project_config(
     force: bool = False,
     data_dir: str | Path | None = None,
     results_dir: str | Path | None = None,
-    task_paths: list[str | Path] | None = None,
+    adapter_paths: list[str | Path] | None = None,
 ) -> Path:
     target = Path(path).expanduser().resolve() if path is not None else (Path.cwd() / PROJECT_CONFIG_NAME).resolve()
     if target.exists() and not force:
@@ -195,7 +195,7 @@ def init_project_config(
         _render_project_config(
             data_dir=resolved_data_dir,
             results_dir=resolved_results_dir,
-            task_paths=task_paths,
+            adapter_paths=adapter_paths,
         ),
         encoding="utf-8",
     )

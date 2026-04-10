@@ -222,6 +222,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
     model_type = traitlets.Unicode("glmhmm").tag(sync=True)  # "glm" | "glmhmm" | "glmhmmt"
     task       = traitlets.Unicode("MCDR").tag(sync=True)
     task_options = traitlets.List(traitlets.Dict()).tag(sync=True)
+    task_discovery_message = traitlets.Unicode("").tag(sync=True)
     is_2afc    = traitlets.Bool(False).tag(sync=True)
 
     existing_models      = traitlets.List(traitlets.Unicode()).tag(sync=True)
@@ -269,7 +270,6 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.task_options = get_task_options()
         self._update_options()
 
     @property
@@ -613,6 +613,36 @@ class ModelManagerWidget(anywidget.AnyWidget):
         self.emission_groups   = _build_regressor_groups(self.emission_cols_options, e_reg)
         self.transition_groups = _build_regressor_groups(self.transition_cols_options, t_reg)
 
+    def _clear_adapter_state(self) -> None:
+        self.is_2afc = False
+        self.show_condition_filter = False
+        self.condition_filter_options = []
+        self.subjects_list = []
+        self.subjects = []
+        self.emission_cols_options = []
+        self.emission_cols = []
+        self.transition_cols_options = []
+        self.transition_cols = []
+        self.existing_models = []
+        self.existing_models_info = []
+        self.existing_model = ""
+        self._refresh_groups()
+
+    def _refresh_task_options(self) -> str:
+        self.task_options = get_task_options()
+        if not self.task_options:
+            self.task_discovery_message = (
+                "No task adapters were found in the configured adapter folders."
+            )
+            return "empty"
+
+        self.task_discovery_message = ""
+        valid_tasks = {opt["value"] for opt in self.task_options}
+        if self.task not in valid_tasks:
+            self.task = self.task_options[0]["value"]
+            return "changed"
+        return "ready"
+
     def _supports_condition_filter(self) -> bool:
         return self.task.upper() in _CONDITION_FILTER_TASKS and self.model_type != "glmhmmt"
 
@@ -664,6 +694,13 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     def _update_options(self) -> None:
         """Refresh all dynamic options from the adapter and the fits directory."""
+        refresh_status = self._refresh_task_options()
+        if refresh_status == "empty":
+            self._clear_adapter_state()
+            return
+        if refresh_status == "changed":
+            return
+
         # ── adapter-derived options ───────────────────────────────────────────
         default_info: dict = {
             "id": "__default__", "name": "Default",
@@ -710,6 +747,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "transition_regressors": ", ".join(tcols),
             }
         except Exception as e:
+            self.task_discovery_message = str(e)
             print(f"Error loading adapter for task {self.task}: {e}")
 
         # ── saved-model list ──────────────────────────────────────────────────

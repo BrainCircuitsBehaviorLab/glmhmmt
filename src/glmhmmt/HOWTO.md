@@ -26,7 +26,7 @@ The editable repo install reads runtime settings from:
 4. Repo-aware fallbacks
 
 `config.toml` is also allowed to override plotting and model settings from the packaged defaults in `src/glmhmmt/resources/default_config.toml`.
-Task discovery uses `GLMHMMT_TASK_PATHS`, then `[plugins].task_paths` in `config.toml`, then `./tasks` in the current working directory.
+Task discovery uses `GLMHMMT_TASK_PATHS`, then `[plugins].adapter_paths` in `config.toml`, then `./adapters` or `./tasks` in the current working directory.
 
 ## Run Fits
 
