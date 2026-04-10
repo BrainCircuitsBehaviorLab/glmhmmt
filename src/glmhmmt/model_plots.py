@@ -1775,7 +1775,13 @@ def _format_lapse_axis_labels(
 ) -> list[str]:
     formatted: list[str] = []
     for idx, raw in enumerate(lapse_labels):
-        choice = choice_labels[idx] if idx < len(choice_labels) else f"Class {idx}"
+        choice_idx = idx
+        if "_prev_" in raw:
+            try:
+                choice_idx = int(str(raw).rsplit("_prev_", 1)[1])
+            except ValueError:
+                choice_idx = idx
+        choice = choice_labels[choice_idx] if choice_idx < len(choice_labels) else f"Class {choice_idx}"
         if lapse_mode == "class":
             formatted.append(choice)
         elif lapse_mode == "history" and raw.startswith("repeat_prev_"):

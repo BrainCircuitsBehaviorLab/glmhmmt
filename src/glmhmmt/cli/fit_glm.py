@@ -263,14 +263,8 @@ if __name__ == "__main__":
         "--lapse_mode",
         type=str,
         default="none",
-        choices=["none", "class", "history", "repeat", "alternate", "repeat_alternate"],
-        help="Lapse model to fit: none, class, or history (repeat/alternate together).",
-    )
-    parser.add_argument(
-        "--lapse",
-        action="store_true",
-        default=False,
-        help="Backward-compatible alias for --lapse_mode=class.",
+        choices=["none", "class", "history"],
+        help="Lapse model to fit: none, class, or history.",
     )
     parser.add_argument("--lapse_max", type=float, default=0.2,
                         help="Upper bound for each lapse rate (default 0.20)")
@@ -284,8 +278,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     configure_paths_from_args(args)
 
-    lapse_mode = "class" if args.lapse else args.lapse_mode
-
     main(
         subjects=args.subjects,
         out_dir=Path(args.out_dir) if args.out_dir else None,
@@ -293,7 +285,7 @@ if __name__ == "__main__":
         task=args.task,
         num_classes=args.num_classes,
         model_alias=args.model_alias,
-        lapse_mode=lapse_mode,
+        lapse_mode=args.lapse_mode,
         lapse_max=args.lapse_max,
         n_restarts=args.n_restarts,
         restart_noise_scale=args.restart_noise_scale,

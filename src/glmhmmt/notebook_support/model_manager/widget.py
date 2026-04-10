@@ -188,13 +188,6 @@ class model_cfg:
     def lapse(self) -> bool:
         return str(self.lapse_mode) != "none"
 
-    @property
-    def normalized_lapse_mode(self) -> str:
-        mode = str(self.lapse_mode).strip().lower()
-        if mode in {"repeat", "alternate", "repeat_alternate"}:
-            return "history"
-        return mode
-
     @classmethod
     def from_value(cls, value: dict[str, Any]) -> "model_cfg":
         existing = value.get("existing_model")
@@ -209,11 +202,7 @@ class model_cfg:
             cv_mode=_normalize_cv_mode(value.get("cv_mode", "none")),
             cv_repeats=int(value.get("cv_repeats", 5)),
             condition_filter=str(value.get("condition_filter", "all")),
-            lapse_mode=(
-                "history"
-                if str(value.get("lapse_mode", "")).strip().lower() in {"repeat", "alternate", "repeat_alternate"}
-                else str(value.get("lapse_mode", "class" if value.get("lapse", False) else "none"))
-            ),
+            lapse_mode=str(value.get("lapse_mode", "none")),
             lapse_max=float(value.get("lapse_max", 0.2)),
             emission_cols=list(value.get("emission_cols", [])),
             transition_cols=list(value.get("transition_cols", [])),
@@ -297,7 +286,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "cv_mode": self.cv_mode,
                 "cv_repeats": int(self.cv_repeats),
                 "condition_filter": self.condition_filter,
-                "lapse_mode": str(self.normalized_lapse_mode),
+                "lapse_mode": str(self.lapse_mode),
                 "lapse_max": float(self.lapse_max),
                 "emission_cols": list(self.emission_cols),
                 "transition_cols": list(self.transition_cols),
@@ -399,9 +388,8 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if isinstance(k, int):
             self.K = k
         self.frozen_emissions = serialize_frozen_emissions(cfg.get("frozen_emissions", {}))
-        if "lapse_mode" in cfg or "lapse" in cfg:
-            raw_mode = str(cfg.get("lapse_mode", "class" if cfg.get("lapse", False) else "none"))
-            self.lapse_mode = "history" if raw_mode.strip().lower() in {"repeat", "alternate", "repeat_alternate"} else raw_mode
+        if "lapse_mode" in cfg:
+            self.lapse_mode = str(cfg["lapse_mode"])
         if "lapse_max" in cfg:
             self.lapse_max = float(cfg["lapse_max"])
         self.alias = display_name
@@ -489,7 +477,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if self._supports_condition_filter():
             cfg["condition_filter"] = self.condition_filter
         if self.model_type == "glm":
-            cfg["lapse_mode"] = str(self.normalized_lapse_mode)
+            cfg["lapse_mode"] = str(self.lapse_mode)
             cfg["lapse_max"] = float(self.lapse_max)
         else:
             cfg["K_list"] = [int(self.K)]
@@ -524,12 +512,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
         if self.model_type == "glm":
             return (
-                (
-                    "history"
-                    if str(saved.get("lapse_mode", "class" if saved.get("lapse", False) else "none")).strip().lower()
-                    in {"repeat", "alternate", "repeat_alternate"}
-                    else str(saved.get("lapse_mode", "class" if saved.get("lapse", False) else "none"))
-                ) == str(self.normalized_lapse_mode)
+                str(saved.get("lapse_mode", "none")) == str(self.lapse_mode)
                 and float(saved.get("lapse_max", 0.2)) == float(self.lapse_max)
             )
 

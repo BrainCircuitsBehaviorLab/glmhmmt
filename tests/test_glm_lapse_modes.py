@@ -67,20 +67,20 @@ def test_fit_glm_class_lapse_three_class_returns_three_rates(monkeypatch):
     np.testing.assert_allclose(fit.predictive_probs.sum(axis=1), np.ones(3))
 
 
-def test_fit_glm_repeat_mode_uses_previous_response_and_skips_first_trial(monkeypatch):
+def test_fit_glm_history_mode_uses_repeat_and_skips_first_trial(monkeypatch):
     monkeypatch.setattr(
         "glmhmmt.glm.minimize",
         _mock_minimize_factory(
             [
                 np.array([0.0]),
-                np.array([0.0, 0.30, 0.10]),
+                np.array([0.0, 0.30, 0.10, 0.0, 0.0]),
             ]
         ),
     )
 
     X = np.zeros((4, 1), dtype=float)
     y = np.array([1, 1, 0, 1], dtype=int)
-    fit = fit_glm(X, y, num_classes=2, lapse_mode="repeat", n_restarts=1, restart_noise_scale=0.0)
+    fit = fit_glm(X, y, num_classes=2, lapse_mode="history", n_restarts=1, restart_noise_scale=0.0)
 
     np.testing.assert_allclose(fit.predictive_probs[0], np.array([0.5, 0.5]))
     assert fit.predictive_probs[1, 1] > fit.predictive_probs[1, 0]
@@ -88,13 +88,13 @@ def test_fit_glm_repeat_mode_uses_previous_response_and_skips_first_trial(monkey
     assert fit.predictive_probs[3, 0] > fit.predictive_probs[3, 1]
 
 
-def test_fit_glm_alternate_mode_three_class_splits_across_non_previous_classes(monkeypatch):
+def test_fit_glm_history_mode_alternate_component_splits_across_non_previous_classes(monkeypatch):
     monkeypatch.setattr(
         "glmhmmt.glm.minimize",
         _mock_minimize_factory(
             [
                 np.array([0.0, 0.0]),
-                np.array([0.0, 0.0, 0.0, 0.60, 0.0]),
+                np.array([0.0, 0.0, 0.0, 0.0, 0.60, 0.0, 0.0, 0.0]),
             ]
         ),
     )
@@ -105,7 +105,7 @@ def test_fit_glm_alternate_mode_three_class_splits_across_non_previous_classes(m
         X,
         y,
         num_classes=3,
-        lapse_mode="alternate",
+        lapse_mode="history",
         lapse_max=1.0,
         n_restarts=1,
         restart_noise_scale=0.0,
@@ -165,38 +165,42 @@ def test_generate_model_id_changes_with_lapse_mode():
     args = ("MCDR", 5.0, ["bias", "stim"])
     no_lapse = generate_model_id(*args, lapse_mode="none")
     class_lapse = generate_model_id(*args, lapse_mode="class")
+    history_lapse = generate_model_id(*args, lapse_mode="history")
 
     assert no_lapse != class_lapse
+    assert class_lapse != history_lapse
 
 
 def test_model_cfg_accepts_new_and_legacy_lapse_fields():
-    new_cfg = model_cfg.from_value({"lapse_mode": "alternate", "lapse_max": 0.4})
-    legacy_cfg = model_cfg.from_value({"lapse": True, "lapse_max": 0.4})
+    new_cfg = model_cfg.from_value({"lapse_mode": "history", "lapse_max": 0.4})
 
-    assert new_cfg.lapse_mode == "alternate"
+    assert new_cfg.lapse_mode == "history"
     assert new_cfg.lapse is True
-    assert legacy_cfg.lapse_mode == "class"
-    assert legacy_cfg.lapse is True
 
 
 def test_plot_lapse_rates_boxplot_uses_lapse_labels():
     views = {
         "s1": SimpleNamespace(
             subject="s1",
-            lapse_rates=np.array([0.1, 0.2]),
-            lapse_mode="repeat",
-            lapse_labels=("repeat_prev_0", "repeat_prev_1"),
+            lapse_rates=np.array([0.1, 0.2, 0.05, 0.15]),
+            lapse_mode="history",
+            lapse_labels=("repeat_prev_0", "repeat_prev_1", "alternate_prev_0", "alternate_prev_1"),
         ),
         "s2": SimpleNamespace(
             subject="s2",
-            lapse_rates=np.array([0.05, 0.15]),
-            lapse_mode="repeat",
-            lapse_labels=("repeat_prev_0", "repeat_prev_1"),
+            lapse_rates=np.array([0.05, 0.15, 0.02, 0.08]),
+            lapse_mode="history",
+            lapse_labels=("repeat_prev_0", "repeat_prev_1", "alternate_prev_0", "alternate_prev_1"),
         ),
     }
 
     fig = plot_lapse_rates_boxplot(views, choice_labels=("Left", "Right"))
 
     labels = [tick.get_text() for tick in fig.axes[0].get_xticklabels()]
-    assert labels == ["Repeat after Left", "Repeat after Right"]
+    assert labels == [
+        "Repeat after Left",
+        "Repeat after Right",
+        "Alternate after Left",
+        "Alternate after Right",
+    ]
     plt.close(fig)

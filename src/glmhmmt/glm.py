@@ -75,8 +75,6 @@ def _normalize_lapse_mode(lapse_mode: str | None, lapse: bool | None) -> str:
     if lapse_mode is None:
         return "class" if lapse else "none"
     normalized = str(lapse_mode).strip().lower()
-    if normalized in {"repeat", "alternate", "repeat_alternate"}:
-        return "history"
     if normalized not in LAPSE_MODES:
         raise ValueError(
             f"Unsupported lapse_mode={lapse_mode!r}; expected one of {sorted(LAPSE_MODES)}."
