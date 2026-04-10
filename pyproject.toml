@@ -1,6 +1,6 @@
 [project]
 name = "glmhmmt"
-version = "0.1.1"
+version = "0.1.2"
 description = "GLM-HMM and GLM-HMMT tooling for behavioural task analysis."
 readme = "README.md"
 authors = [
