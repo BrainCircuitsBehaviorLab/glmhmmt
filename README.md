@@ -69,13 +69,26 @@ At runtime, config precedence is:
 4. repo-local `config.toml` for editable installs
 5. packaged defaults in `src/glmhmmt/resources/default_config.toml`
 
+## Runtime Compatibility
+
+The published package is tested against:
+
+- `jax==0.4.35`
+- `jaxlib==0.4.35`
+- `tensorflow-probability==0.25.0`
+- `optax==0.2.5`
+
+These pins are intentionally conservative because newer JAX / TFP combinations
+have broken the `tensorflow_probability.substrates.jax` import path used by
+`dynamax` and `glmhmmt.model`.
+
 ## Task Adapters Are Optional
 
 This package does not need task adapters when someone only wants the reusable model classes and fitting utilities.
 
 If a user wants task-aware CLIs or notebooks, they can provide adapters in either of these ways:
 
-1. Put a `tasks/` package in their own working directory and point `GLMHMMT_TASK_PATHS` at it.
+1. Put an `adapters/` package in their own working directory, or configure `[plugins].adapter_paths` / `GLMHMMT_TASK_PATHS`.
 2. Install a separate package that exposes entry points in the `glmhmmt.tasks` group.
 
 Minimal entry-point example:
