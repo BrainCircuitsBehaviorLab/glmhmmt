@@ -18,7 +18,6 @@ from glmhmmt.model import SoftmaxGLMHMM, normalize_frozen_emissions, serialize_f
 from glmhmmt.runtime import (
     add_runtime_path_args,
     configure_paths_from_args,
-    get_data_dir,
     get_results_dir,
 )
 from glmhmmt.tasks import get_adapter
@@ -51,7 +50,7 @@ def generate_model_id(
 
 def _load_subject_feature_df(subject: str, task: str, tau: float) -> tuple[Any, pl.DataFrame]:
     adapter = get_adapter(task)
-    df = pl.read_parquet(get_data_dir() / adapter.data_file)
+    df = adapter.read_dataset()
     df = adapter.subject_filter(df)
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
     feature_df = adapter.build_feature_df(df_sub, tau=tau)
@@ -531,7 +530,7 @@ def main(
     frozen_spec = serialize_frozen_emissions(frozen_emissions)
     df = None
     if emission_cols is None or subjects is None:
-        df = pl.read_parquet(get_data_dir() / adapter.data_file)
+        df = adapter.read_dataset()
         df = adapter.subject_filter(df)
     resolved_emission_cols = emission_cols or adapter.default_emission_cols(df)
     if out_dir is None:
@@ -566,7 +565,7 @@ def main(
         )
     if subjects is None:
         if df is None:
-            df = pl.read_parquet(get_data_dir() / adapter.data_file)
+            df = adapter.read_dataset()
             df = adapter.subject_filter(df)
         subjects = df["subject"].unique().sort().to_list()
 
@@ -632,7 +631,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    add_runtime_path_args(parser, include_alexis_dir=True)
+    add_runtime_path_args(parser)
     parser.add_argument("--subjects", nargs="+", default=None)
     parser.add_argument("--K", nargs="+", type=int, default=[2, 3])
     parser.add_argument("--num_iters", type=int, default=50)
@@ -655,7 +654,7 @@ if __name__ == "__main__":
         help='JSON object mapping state indices to {feature: fixed_value}, e.g. \'{"0":{"SL":0.0}}\'.',
     )
     args = parser.parse_args()
-    configure_paths_from_args(args, include_alexis_dir=True)
+    configure_paths_from_args(args)
     frozen_emissions = json.loads(args.frozen_emissions) if args.frozen_emissions else None
     main(
         subjects=args.subjects,

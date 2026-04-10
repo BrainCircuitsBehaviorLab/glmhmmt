@@ -20,7 +20,6 @@ from glmhmmt.model import SoftmaxGLMHMM, normalize_frozen_emissions, serialize_f
 from glmhmmt.runtime import (
     add_runtime_path_args,
     configure_paths_from_args,
-    get_data_dir,
     get_results_dir,
 )
 from glmhmmt.tasks import get_adapter
@@ -74,7 +73,7 @@ def _filter_condition_df(df: pl.DataFrame, task: str, condition_filter: str | No
 
 def _load_subject_feature_df(subject: str, task: str, tau: float, condition_filter: str = "all") -> tuple[Any, pl.DataFrame]:
     adapter = get_adapter(task)
-    df = pl.read_parquet(get_data_dir() / adapter.data_file)
+    df = adapter.read_dataset()
     df = adapter.subject_filter(df)
     df = _filter_condition_df(df, task, condition_filter)
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
@@ -523,7 +522,7 @@ def main(
     condition_filter = _normalize_condition_filter(task, condition_filter)
     df = None
     if emission_cols is None or subjects is None:
-        df = pl.read_parquet(get_data_dir() / adapter.data_file)
+        df = adapter.read_dataset()
         df = adapter.subject_filter(df)
         df = _filter_condition_df(df, task, condition_filter)
     resolved_emission_cols = emission_cols or adapter.default_emission_cols(df)
@@ -560,7 +559,7 @@ def main(
         )
     if subjects is None:
         if df is None:
-            df = pl.read_parquet(get_data_dir() / adapter.data_file)
+            df = adapter.read_dataset()
             df = adapter.subject_filter(df)
             df = _filter_condition_df(df, task, condition_filter)
         subjects = df["subject"].unique().sort().to_list()
@@ -624,7 +623,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    add_runtime_path_args(parser, include_alexis_dir=True)
+    add_runtime_path_args(parser)
     parser.add_argument("--subjects", nargs="+", default=None, help="List of subject IDs. If None, fits all subjects.")
     parser.add_argument("--K", nargs="+", type=int, default=[2, 3], help="List of number of states to fit.")
     parser.add_argument("--num_iters", type=int, default=50)
@@ -660,7 +659,7 @@ if __name__ == "__main__":
         help="Condition subset for 2AFC_DRUG. Ignored for other tasks.",
     )
     args = parser.parse_args()
-    configure_paths_from_args(args, include_alexis_dir=True)
+    configure_paths_from_args(args)
     frozen_emissions = json.loads(args.frozen_emissions) if args.frozen_emissions else None
     main(
         subjects=args.subjects,

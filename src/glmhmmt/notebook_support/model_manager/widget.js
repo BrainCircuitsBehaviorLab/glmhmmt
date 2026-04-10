@@ -450,7 +450,7 @@ function render({ model, el }) {
     const showConditionFilter = model.get("show_condition_filter");
     const conditionFilterOptions = model.get("condition_filter_options") || [];
     const currentConditionFilter = model.get("condition_filter") || "all";
-    const currentLapse     = model.get("lapse");
+    const currentLapseMode = model.get("lapse_mode") || "none";
     const currentLapseMax  = model.get("lapse_max");
     const currentAlias     = model.get("alias");
     const aliasError       = model.get("alias_error");
@@ -622,23 +622,26 @@ function render({ model, el }) {
         `;
       }
 
-      if (modelType === "glm" && is2afc) {
+      if (modelType === "glm") {
         html += `
           <div class="mm-col">
             <div class="mm-section row-align">
-              <label class="mm-checkbox">
-                <input type="checkbox" id="inp-lapse" ${currentLapse ? "checked" : ""}>
-                <span class="mm-checkmark"></span>
-                Fit Lapse Rates
-              </label>
-              <div class="mm-slider-wrap tight ${!currentLapse ? "disabled" : ""}">
+              <div class="mm-col half-col">
+                <label class="mm-label inline">Lapse Mode</label>
+                <select id="inp-lapse-mode" class="mm-input small">
+                  <option value="none" ${currentLapseMode === "none" ? "selected" : ""}>none</option>
+                  <option value="class" ${currentLapseMode === "class" ? "selected" : ""}>class</option>
+                  <option value="history" ${currentLapseMode === "history" ? "selected" : ""}>repeat/alternate</option>
+                </select>
+              </div>
+              <div class="mm-slider-wrap tight ${currentLapseMode === "none" ? "disabled" : ""}">
                 <span class="mm-label inline">Max Lapse:</span>
                 <input type="range" class="mm-range" id="inp-lapse-max-range"
                        min="0.01" max="1.0" value="${currentLapseMax}" step="0.01"
-                       ${!currentLapse ? "disabled" : ""}>
+                       ${currentLapseMode === "none" ? "disabled" : ""}>
                 <input type="number" class="mm-num-input" id="inp-lapse-max-num"
                        min="0.01" max="1.0" value="${currentLapseMax}" step="0.01"
-                       ${!currentLapse ? "disabled" : ""}>
+                       ${currentLapseMode === "none" ? "disabled" : ""}>
               </div>
             </div>
           </div>
@@ -924,9 +927,8 @@ function render({ model, el }) {
     syncSlider("inp-tau-range",        "inp-tau-num",        "tau",       parseInt);
     syncSlider("inp-lapse-max-range",  "inp-lapse-max-num",  "lapse_max", parseFloat);
 
-    // Lapse checkbox
-    bind("#inp-lapse", "change", (e) => {
-      model.set("lapse", e.target.checked);
+    bind("#inp-lapse-mode", "change", (e) => {
+      model.set("lapse_mode", e.target.value);
       model.save_changes();
     });
 

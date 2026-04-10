@@ -16,15 +16,11 @@ DEFAULT_CONFIG_RESOURCE = "resources/default_config.toml"
 ENV_DATA_DIR = "GLMHMMT_DATA_DIR"
 ENV_RESULTS_DIR = "GLMHMMT_RESULTS_DIR"
 ENV_CONFIG_PATH = "GLMHMMT_CONFIG_PATH"
-ENV_ALEXIS_DIR = "GLMHMMT_ALEXIS_DIR"
-
-
 @dataclass(frozen=True)
 class RuntimePaths:
     data_dir: Path
     results_dir: Path
     config_path: Path | None
-    alexis_dir: Path
     package_root: Path
     code_root: Path
     workspace_root: Path
@@ -51,24 +47,18 @@ class RuntimePaths:
     def DATA_PATH(self) -> Path:
         return self.data_dir
 
-    @property
-    def ALEXIS(self) -> Path:
-        return self.alexis_dir
-
     def show_paths(self) -> None:
         print(f"ROOT      = {self.workspace_root}")
         print(f"CODE_DIR  = {self.code_root}")
         print(f"DATA_PATH = {self.data_dir}")
         print(f"RESULTS   = {self.results_dir}")
         print(f"CONFIG    = {self.config_path}")
-        print(f"ALEXIS    = {self.alexis_dir}")
 
 
 _runtime_overrides: dict[str, Path | None] = {
     "data_dir": None,
     "results_dir": None,
     "config_path": None,
-    "alexis_dir": None,
 }
 
 
@@ -128,6 +118,90 @@ def _default_project_config_path() -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def _find_upward_config_path(start: str | Path | None = None) -> Path | None:
+    current = Path(start).expanduser().resolve() if start is not None else Path.cwd().resolve()
+    if current.is_file():
+        current = current.parent
+    for directory in (current, *current.parents):
+        candidate = directory / PROJECT_CONFIG_NAME
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _serialize_path(value: str | Path) -> str:
+    return Path(value).expanduser().resolve().as_posix()
+
+
+def _render_project_config(
+    *,
+    data_dir: str | Path,
+    results_dir: str | Path,
+    task_paths: list[str | Path] | None = None,
+) -> str:
+    lines = [
+        "# Project-local overrides for glmhmmt.",
+        "# Relative paths are resolved relative to this file.",
+        "# Precedence: configure_paths(...) > GLMHMMT_CONFIG_PATH > nearest config.toml >",
+        "# packaged defaults.",
+        "",
+        "[paths]",
+        f'data_dir = "{_serialize_path(data_dir)}"',
+        f'results_dir = "{_serialize_path(results_dir)}"',
+    ]
+    if task_paths:
+        lines.extend(
+            [
+                "",
+                "[plugins]",
+                "task_paths = [",
+                *[f'    "{_serialize_path(path)}",' for path in task_paths],
+                "]",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "[plugins]",
+                "# Optional local task packages. Prefer installed entry points when possible.",
+                '# task_paths = ["/absolute/path/to/tasks"]',
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def init_project_config(
+    *,
+    path: str | Path | None = None,
+    force: bool = False,
+    data_dir: str | Path | None = None,
+    results_dir: str | Path | None = None,
+    task_paths: list[str | Path] | None = None,
+) -> Path:
+    target = Path(path).expanduser().resolve() if path is not None else (Path.cwd() / PROJECT_CONFIG_NAME).resolve()
+    if target.exists() and not force:
+        raise FileExistsError(
+            f"Config already exists at {target}. Pass force=True to overwrite it."
+        )
+
+    current = get_runtime_paths()
+    resolved_data_dir = data_dir or current.data_dir
+    resolved_results_dir = results_dir or current.results_dir
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        _render_project_config(
+            data_dir=resolved_data_dir,
+            results_dir=resolved_results_dir,
+            task_paths=task_paths,
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
 def _configured_paths_from_file(config_path: Path | None) -> dict[str, Path]:
     if config_path is None or not config_path.exists():
         return {}
@@ -138,7 +212,7 @@ def _configured_paths_from_file(config_path: Path | None) -> dict[str, Path]:
         return {}
 
     resolved: dict[str, Path] = {}
-    for key in ("data_dir", "results_dir", "alexis_dir"):
+    for key in ("data_dir", "results_dir"):
         path_value = _resolve_configured_path(raw_paths.get(key), config_path=config_path)
         if path_value is not None:
             resolved[key] = path_value
@@ -150,13 +224,11 @@ def configure_paths(
     data_dir: str | Path | None = None,
     results_dir: str | Path | None = None,
     config_path: str | Path | None = None,
-    alexis_dir: str | Path | None = None,
 ) -> None:
     updates = {
         "data_dir": data_dir,
         "results_dir": results_dir,
         "config_path": config_path,
-        "alexis_dir": alexis_dir,
     }
     changed = False
     for key, value in updates.items():
@@ -178,6 +250,7 @@ def get_runtime_paths() -> RuntimePaths:
     config_path = (
         _runtime_overrides["config_path"]
         or _path_from_env(ENV_CONFIG_PATH)
+        or _find_upward_config_path()
         or _default_project_config_path()
     )
     configured_paths = _configured_paths_from_file(config_path)
@@ -194,18 +267,10 @@ def get_runtime_paths() -> RuntimePaths:
         or configured_paths.get("results_dir")
         or (repo_results_dir if repo_results_dir.exists() else Path("results").resolve())
     )
-    alexis_dir = (
-        _runtime_overrides["alexis_dir"]
-        or _path_from_env(ENV_ALEXIS_DIR)
-        or configured_paths.get("alexis_dir")
-        or (data_dir / "Alexis")
-    )
-
     return RuntimePaths(
         data_dir=data_dir,
         results_dir=results_dir,
         config_path=config_path,
-        alexis_dir=alexis_dir,
         package_root=package_root,
         code_root=code_root,
         workspace_root=workspace_root,
@@ -218,10 +283,6 @@ def get_data_dir() -> Path:
 
 def get_results_dir() -> Path:
     return get_runtime_paths().results_dir
-
-
-def get_alexis_dir() -> Path:
-    return get_runtime_paths().alexis_dir
 
 
 def get_config_path() -> Path | None:
@@ -248,8 +309,6 @@ def load_app_config(config_path: str | Path | None = None) -> dict:
 
 def add_runtime_path_args(
     parser: argparse.ArgumentParser,
-    *,
-    include_alexis_dir: bool = False,
 ) -> None:
     parser.add_argument("--data-dir", type=str, default=None, help=f"Override data directory (env: {ENV_DATA_DIR}).")
     parser.add_argument(
@@ -267,19 +326,9 @@ def add_runtime_path_args(
             f"(env: {ENV_CONFIG_PATH})."
         ),
     )
-    if include_alexis_dir:
-        parser.add_argument(
-            "--alexis-dir",
-            type=str,
-            default=None,
-            help=f"Override Alexis raw-data directory (env: {ENV_ALEXIS_DIR}).",
-        )
-
-
-def configure_paths_from_args(args: argparse.Namespace, *, include_alexis_dir: bool = False) -> None:
+def configure_paths_from_args(args: argparse.Namespace) -> None:
     configure_paths(
         data_dir=getattr(args, "data_dir", None),
         results_dir=getattr(args, "results_dir", None),
         config_path=getattr(args, "config_path", None),
-        alexis_dir=getattr(args, "alexis_dir", None) if include_alexis_dir else None,
     )

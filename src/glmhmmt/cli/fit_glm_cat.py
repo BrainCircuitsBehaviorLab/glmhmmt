@@ -6,7 +6,6 @@ import seaborn as sns
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 
-from glmhmmt.runtime import get_data_dir
 from glmhmmt.tasks import get_adapter
 
 sns.set_style("white")
@@ -83,7 +82,7 @@ def build_glm_cat_sequence(df_sub: pl.DataFrame, tau = 50):
     }
     return jnp.asarray(y), jnp.asarray(X), jnp.asarray(U), names, jnp.concatenate([A_plus, A_minus], axis=1)
 
-df = pl.read_parquet(get_data_dir() / adapter.data_file)
+df = adapter.read_dataset()
 y, X, U, names, _ = build_glm_cat_sequence(df.filter(pl.col("subject") == "A89"))
 
 y_np = np.asarray(y)        # (T,)  int {0,1,2}
@@ -155,8 +154,8 @@ df_sub = df_sub.with_columns([
     pl.Series("pR", pR),
     pl.Series("pred_choice", np.argmax(p_pred, axis=1)),
 ])
-df_sub.write_parquet(get_data_dir() / "predictions_glm.parquet")
-print("Saved:", get_data_dir() / "predictions_glm.parquet")
+df_sub.write_parquet(adapter.dataset_path().parent / "predictions_glm.parquet")
+print("Saved:", adapter.dataset_path().parent / "predictions_glm.parquet")
 
 plot_df = plots.prepare_predictions_df(df_sub)
 plots.plot_categorical_performance_all(plot_df, "glm")

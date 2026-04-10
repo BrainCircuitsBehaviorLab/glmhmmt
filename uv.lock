@@ -312,18 +312,6 @@ wheels = [
 ]
 
 [[package]]
-name = "autograd"
-version = "1.8.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/67/1c/3c24ec03c8ba4decc742b1df5a10c52f98c84ca8797757f313e7bdcdf276/autograd-1.8.0.tar.gz", hash = "sha256:107374ded5b09fc8643ac925348c0369e7b0e73bbed9565ffd61b8fd04425683", size = 2562146, upload-time = "2025-05-05T12:49:02.502Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/ea/e16f0c423f7d83cf8b79cae9452040fb7b2e020c7439a167ee7c317de448/autograd-1.8.0-py3-none-any.whl", hash = "sha256:4ab9084294f814cf56c280adbe19612546a35574d67c574b04933c7d2ecb7d78", size = 51478, upload-time = "2025-05-05T12:49:00.585Z" },
-]
-
-[[package]]
 name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
@@ -855,13 +843,14 @@ dependencies = [
     { name = "numpy" },
     { name = "optax" },
     { name = "pandas" },
+    { name = "platformdirs" },
     { name = "plotly" },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "scipy" },
     { name = "seaborn" },
-    { name = "ssm" },
     { name = "tfp-nightly" },
+    { name = "traitlets" },
     { name = "wigglystuff" },
 ]
 
@@ -872,7 +861,6 @@ notebooks = [
     { name = "plotly" },
     { name = "sbi" },
     { name = "scikit-learn" },
-    { name = "ssm" },
     { name = "torch" },
     { name = "traitlets" },
     { name = "wigglystuff" },
@@ -894,6 +882,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "optax", specifier = ">=0.2.7" },
     { name = "pandas", specifier = ">=3.0.0" },
+    { name = "platformdirs", specifier = ">=4.5.1" },
     { name = "plotly", specifier = ">=6.5.2" },
     { name = "plotly", marker = "extra == 'notebooks'", specifier = "==6.5.2" },
     { name = "polars", specifier = ">=1.38.1" },
@@ -902,10 +891,9 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'notebooks'", specifier = "==1.8.0" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "ssm", specifier = ">=0.0.1" },
-    { name = "ssm", marker = "extra == 'notebooks'", specifier = "==0.0.1" },
     { name = "tfp-nightly", specifier = "==0.26.0.dev20260205" },
     { name = "torch", marker = "extra == 'notebooks'", specifier = "==2.5.1" },
+    { name = "traitlets", specifier = ">=5.14.3" },
     { name = "traitlets", marker = "extra == 'notebooks'", specifier = "==5.14.3" },
     { name = "wigglystuff", specifier = ">=0.3.1" },
     { name = "wigglystuff", marker = "extra == 'notebooks'", specifier = "==0.3.1" },
@@ -3407,20 +3395,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
 ]
-
-[[package]]
-name = "ssm"
-version = "0.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "autograd" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b0/87/f836d23ea3afcc860e8a31e4f04193735140c4fe86cfd0106ca5e81071db/ssm-0.0.1.tar.gz", hash = "sha256:b3eca53d3049306097de5977bb5c663f0c5f11db14e77ad7515c2902067f0458", size = 309185, upload-time = "2019-07-19T02:14:41.275Z" }
 
 [[package]]
 name = "stack-data"

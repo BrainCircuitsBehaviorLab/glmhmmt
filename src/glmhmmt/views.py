@@ -184,6 +184,8 @@ class SubjectFitView:
     state_rank_by_idx: dict[int, int]
     predictive_state_probs: np.ndarray  # (T, K)
     lapse_rates: Optional[np.ndarray] = None
+    lapse_mode: str = "none"
+    lapse_labels: tuple[str, ...] = field(default_factory=tuple)
     # optional
     p_pred: Optional[np.ndarray] = None  # (T, C)
     initial_probs: Optional[np.ndarray] = None  # (K,)
@@ -321,6 +323,8 @@ def build_views(
             state_idx_order=[int(k) for k in sorder],
             state_rank_by_idx={int(k): v for k, v in srank.items()},
             lapse_rates=np.asarray(d["lapse_rates"]) if "lapse_rates" in d else None,
+            lapse_mode=str(d.get("lapse_mode", "none")),
+            lapse_labels=tuple(np.asarray(d.get("lapse_labels", []), dtype=str).tolist()),
             p_pred=np.asarray(d["p_pred"]) if "p_pred" in d else None,
             predictive_state_probs=predictive_state_probs,
             initial_probs=np.asarray(d["initial_probs"]) if "initial_probs" in d else None,

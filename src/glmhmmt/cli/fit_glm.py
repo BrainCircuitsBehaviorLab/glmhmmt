@@ -9,7 +9,6 @@ from glmhmmt.glm import fit_glm
 from glmhmmt.runtime import (
     add_runtime_path_args,
     configure_paths_from_args,
-    get_data_dir,
     get_results_dir,
 )
 from glmhmmt.tasks import get_adapter
@@ -21,7 +20,7 @@ def fit_subject(
     tau: float = 5.0,
     num_classes: int = 3,
     task: str = "MCDR",
-    lapse: bool = False,
+    lapse_mode: str = "none",
     lapse_max: float = 0.2,
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
@@ -34,7 +33,7 @@ def fit_subject(
     num_classes = adapter.num_classes
 
     # 1. Load Data
-    df = pl.read_parquet(get_data_dir() / adapter.data_file)
+    df = adapter.read_dataset()
     df = adapter.subject_filter(df)
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
     if len(df_sub) == 0:
@@ -44,7 +43,7 @@ def fit_subject(
         X,
         y,
         num_classes=num_classes,
-        lapse=lapse and (num_classes == 2),
+        lapse_mode=lapse_mode,
         lapse_max=lapse_max,
         n_restarts=n_restarts,
         restart_noise_scale=restart_noise_scale,
@@ -55,7 +54,9 @@ def fit_subject(
         "subject": subject,
         "W": fit.weights,              # (C, M)
         "p_pred": fit.predictive_probs,         # (T, C)
-        "lapse_rates": fit.lapse_rates,  # [gamma_L, gamma_R]
+        "lapse_rates": fit.lapse_rates,
+        "lapse_mode": fit.lapse_mode,
+        "lapse_labels": fit.lapse_labels,
         "nll": fit.negative_log_likelihood,
         "success": fit.success,
         "y": fit.y,
@@ -99,13 +100,14 @@ def save_results(result: dict, out_dir: Path, tau: float):
         initial_probs=np.ones(1),
         transition_matrix=np.ones((1, 1)),
         X_cols=result["names"]["X_cols"] if "X_cols" in result["names"] else [],
-        lapse_rates=result.get("lapse_rates", np.zeros(2)),
+        lapse_rates=result.get("lapse_rates", np.zeros(C)),
+        lapse_mode=result.get("lapse_mode", "none"),
+        lapse_labels=np.asarray(result.get("lapse_labels", []), dtype=str),
         success=result["success"],
     )
 
-    # Metrics — count lapse params in k if non-zero
-    _lapse = result.get("lapse_rates", np.zeros(2))
-    _n_lapse_params = int(np.any(_lapse > 0)) * 2
+    _lapse = np.asarray(result.get("lapse_rates", np.zeros(C)), dtype=float)
+    _n_lapse_params = int(_lapse.size)
     acc = float(np.mean(np.argmax(result["p_pred"], axis=1) == result["y"])) if result["T"] > 0 else 0.0
     raw_ll = -float(result["nll"]) if result["T"] > 0 else np.nan
     ll_per_trial = raw_ll / result["T"] if result["T"] > 0 else np.nan
@@ -130,7 +132,7 @@ def generate_model_id(
     task,
     tau,
     emission_cols,
-    lapse: bool = False,
+    lapse_mode: str = "none",
     lapse_max: float = 0.2,
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
@@ -140,15 +142,14 @@ def generate_model_id(
     config = {
         "task": task,
         "tau": float(tau),
-        "emission_cols": cols
+        "emission_cols": cols,
+        "lapse_mode": str(lapse_mode),
     }
-    if get_adapter(task).num_classes == 2:
-        config["lapse"] = lapse
-        if lapse:
-            config["lapse_max"] = float(lapse_max)
-            config["n_restarts"] = int(n_restarts)
-            config["restart_noise_scale"] = float(restart_noise_scale)
-            config["seed"] = None if seed is None else int(seed)
+    if lapse_mode != "none":
+        config["lapse_max"] = float(lapse_max)
+        config["n_restarts"] = int(n_restarts)
+        config["restart_noise_scale"] = float(restart_noise_scale)
+        config["seed"] = None if seed is None else int(seed)
     config_str = json.dumps(config, sort_keys=True)
     return hashlib.md5(config_str.encode()).hexdigest()[:8]
 
@@ -160,7 +161,7 @@ def main(
     num_classes: int = 3,
     task: str = "MCDR",
     model_alias: str | None = None,
-    lapse: bool = False,
+    lapse_mode: str = "none",
     lapse_max: float = 0.2,
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
@@ -174,7 +175,7 @@ def main(
         task,
         tau,
         emission_cols,
-        lapse=lapse,
+        lapse_mode=lapse_mode,
         lapse_max=lapse_max,
         n_restarts=n_restarts,
         restart_noise_scale=restart_noise_scale,
@@ -205,7 +206,7 @@ def main(
                  "tau": tau,
                  "emission_cols": emission_cols,
                  "num_classes": num_classes,
-                 "lapse": lapse,
+                 "lapse_mode": lapse_mode,
                  "lapse_max": lapse_max,
                  "n_restarts": n_restarts,
                  "restart_noise_scale": restart_noise_scale,
@@ -219,7 +220,7 @@ def main(
     num_classes = adapter.num_classes
 
     if subjects is None:
-        df = pl.read_parquet(get_data_dir() / adapter.data_file)
+        df = adapter.read_dataset()
         df = adapter.subject_filter(df)
         subjects = df["subject"].unique().sort().to_list()
 
@@ -234,7 +235,7 @@ def main(
                 emission_cols=emission_cols,
                 num_classes=num_classes,
                 task=task,
-                lapse=lapse,
+                lapse_mode=lapse_mode,
                 lapse_max=lapse_max,
                 n_restarts=n_restarts,
                 restart_noise_scale=restart_noise_scale,
@@ -251,15 +252,26 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    add_runtime_path_args(parser, include_alexis_dir=True)
+    add_runtime_path_args(parser)
     parser.add_argument("--subjects", nargs="+", default=None)
     parser.add_argument("--out_dir", type=str, default=None)
     parser.add_argument("--tau", type=float, default=50.0) 
     parser.add_argument("--task", type=str, default="MCDR", choices=["MCDR", "2AFC", "nuo_auditory"])
     parser.add_argument("--num_classes", type=int, default=3)
     parser.add_argument("--model_alias", type=str, default=None)
-    parser.add_argument("--lapse", action="store_true", default=False,
-                        help="Fit lapse rates γ_L, γ_R with 0 <= γ <= lapse_max and γ_L + γ_R <= 1")
+    parser.add_argument(
+        "--lapse_mode",
+        type=str,
+        default="none",
+        choices=["none", "class", "history", "repeat", "alternate", "repeat_alternate"],
+        help="Lapse model to fit: none, class, or history (repeat/alternate together).",
+    )
+    parser.add_argument(
+        "--lapse",
+        action="store_true",
+        default=False,
+        help="Backward-compatible alias for --lapse_mode=class.",
+    )
     parser.add_argument("--lapse_max", type=float, default=0.2,
                         help="Upper bound for each lapse rate (default 0.20)")
     parser.add_argument("--n_restarts", type=int, default=5,
@@ -270,7 +282,9 @@ if __name__ == "__main__":
                         help="Random seed for lapse-fit restart initialization noise")
 
     args = parser.parse_args()
-    configure_paths_from_args(args, include_alexis_dir=True)
+    configure_paths_from_args(args)
+
+    lapse_mode = "class" if args.lapse else args.lapse_mode
 
     main(
         subjects=args.subjects,
@@ -279,7 +293,7 @@ if __name__ == "__main__":
         task=args.task,
         num_classes=args.num_classes,
         model_alias=args.model_alias,
-        lapse=args.lapse,
+        lapse_mode=lapse_mode,
         lapse_max=args.lapse_max,
         n_restarts=args.n_restarts,
         restart_noise_scale=args.restart_noise_scale,

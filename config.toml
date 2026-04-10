@@ -3,9 +3,9 @@
 # src/glmhmmt/resources/default_config.toml.
 
 [paths]
-data_dir = "../../data"
-results_dir = "../results"
-alexis_dir = "../../data/Alexis"
+data_dir = "../data"
+results_dir = "../code/results"
+alexis_dir = "../data/Alexis"
 
 [plugins]
-task_paths = ["../tasks"]
+task_paths = ["../bcb-behavioral-tasks/tasks"]

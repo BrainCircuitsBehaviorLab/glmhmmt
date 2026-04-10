@@ -20,12 +20,14 @@ dependencies = [
     "numpy>=2.3.5",
     "optax>=0.2.7",
     "pandas>=3.0.0",
+    "platformdirs>=4.5.1",
     "plotly>=6.5.2",
     "polars>=1.38.1",
     "pyarrow>=23.0.1",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
     "tfp-nightly==0.26.0.dev20260205",
+    "traitlets>=5.14.3",
     "wigglystuff>=0.3.1",
 ]
 
@@ -46,6 +48,7 @@ glmhmmt-fit-glm = "glmhmmt.cli.fit_glm:main"
 glmhmmt-fit-glmhmm = "glmhmmt.cli.fit_glmhmm:main"
 glmhmmt-fit-glmhmmt = "glmhmmt.cli.fit_glmhmmt:main"
 glmhmmt-fit-tau-sweep = "glmhmmt.cli.fit_tau_sweep:main"
+glmhmmt-init-config = "glmhmmt.cli.init_config:main"
 
 [tool.uv]
 # Exclude the stable distribution pulled transitively by Dynamax so the

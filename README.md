@@ -42,6 +42,33 @@ The package root uses lazy imports, so importing `SoftmaxGLMHMM` does not requir
 
 The CLI entrypoints under `glmhmmt.cli.*` are wrappers around task adapters, runtime paths, and result directories. They are useful for command-line workflows, but they are not the recommended import interface for another project.
 
+## Runtime Config
+
+`glmhmmt` now looks for `config.toml` by searching upward from the current working directory. That means each analysis project can keep its own config next to its notebooks and scripts.
+
+The clean way to initialise one is:
+
+```bash
+uv run glmhmmt-init-config
+```
+
+That writes `config.toml` in the current working directory. You can also choose the destination explicitly:
+
+```bash
+uv run glmhmmt-init-config \
+  --path ./config.toml \
+  --data-dir /absolute/path/to/data \
+  --results-dir /absolute/path/to/results
+```
+
+At runtime, config precedence is:
+
+1. `configure_paths(...)`
+2. `GLMHMMT_CONFIG_PATH`
+3. nearest `config.toml` found by upward search from the current working directory
+4. repo-local `config.toml` for editable installs
+5. packaged defaults in `src/glmhmmt/resources/default_config.toml`
+
 ## Task Adapters Are Optional
 
 This package does not need task adapters when someone only wants the reusable model classes and fitting utilities.

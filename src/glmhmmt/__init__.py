@@ -18,6 +18,7 @@ __all__ = [
     "get_task_options",
     "configure_paths",
     "get_runtime_paths",
+    "init_project_config",
     "load_app_config",
 ]
 
@@ -37,6 +38,7 @@ _LAZY_IMPORTS = {
     "get_task_options": ("glmhmmt.tasks", "get_task_options"),
     "configure_paths": ("glmhmmt.runtime", "configure_paths"),
     "get_runtime_paths": ("glmhmmt.runtime", "get_runtime_paths"),
+    "init_project_config": ("glmhmmt.runtime", "init_project_config"),
     "load_app_config": ("glmhmmt.runtime", "load_app_config"),
 }
 

@@ -8,7 +8,7 @@ Usage
     from glmhmmt.tasks import get_adapter
 
     adapter = get_adapter("mcdr")   # or "two_afc" / "2AFC" / "MCDR"
-    df      = pl.read_parquet(get_data_dir() / adapter.data_file)
+    df      = adapter.read_dataset()
     df      = adapter.subject_filter(df)
     y, X, U, names = adapter.load_subject(df_sub, tau=50.0)
     plots   = adapter.get_plots()
@@ -26,8 +26,9 @@ from typing import List, Tuple, Dict, Any
 import warnings
 
 import types
+import polars as pl
 
-from glmhmmt.runtime import get_config_path, load_app_config
+from glmhmmt.runtime import get_config_path, get_data_dir, load_app_config
 
 
 ENV_TASK_PATHS = "GLMHMMT_TASK_PATHS"
@@ -40,7 +41,7 @@ class TaskAdapter(ABC):
     task_key: str = NotImplemented      # canonical UI / CLI task name
     task_label: str = NotImplemented    # human-readable task label
     num_classes: int = NotImplemented   # 2 or 3
-    data_file: str = NotImplemented     # filename under get_data_dir()
+    data_file: str = NotImplemented     # filename under the runtime dataset root
     sort_col: str = NotImplemented      # trial ordering column
     session_col: str = NotImplemented   # session identifier column
 
@@ -145,6 +146,14 @@ class TaskAdapter(ABC):
     def cv_balance_labels(self, feature_df: Any):
         """Return per-trial labels used for CV balancing, or ``None`` if unsupported."""
         return None
+
+    def dataset_path(self) -> Path:
+        """Return the on-disk dataset path for this task."""
+        return get_data_dir() / self.data_file
+
+    def read_dataset(self) -> pl.DataFrame:
+        """Load and return the full task dataset."""
+        return pl.read_parquet(self.dataset_path())
 
     # ── plot module ─────────────────────────────────────────────────────────
 

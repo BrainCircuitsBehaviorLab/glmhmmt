@@ -105,7 +105,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sweep tau for GLM-HMM and/or GLM-HMMt models."
     )
-    add_runtime_path_args(parser, include_alexis_dir=True)
+    add_runtime_path_args(parser)
     parser.add_argument(
         "--model", nargs="+", choices=["glmhmm", "glmhmmt"], default=["glmhmm"],
         help="Model(s) to sweep.",
@@ -127,7 +127,7 @@ def main() -> None:
         help="glmhmmt only: transition regressors.",
     )
     args = parser.parse_args()
-    configure_paths_from_args(args, include_alexis_dir=True)
+    configure_paths_from_args(args)
 
     taus = list(range(args.tau_min, args.tau_max + 1, args.tau_step))
     print(f"Sweeping τ ∈ {taus[:3]}…{taus[-3:]} ({len(taus)} values)")

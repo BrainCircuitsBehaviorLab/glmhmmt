@@ -3,7 +3,22 @@ import traitlets
 import string
 import random
 
-from .model_manager import ModelManagerWidget, model_cfg  # noqa: F401  (re-exported)
+
+__all__ = ["CoefTweakerWidget", "ModelManagerWidget", "model_cfg"]
+
+
+def __getattr__(name: str):
+    if name in {"ModelManagerWidget", "model_cfg"}:
+        from .model_manager import ModelManagerWidget, model_cfg
+
+        exports = {
+            "ModelManagerWidget": ModelManagerWidget,
+            "model_cfg": model_cfg,
+        }
+        value = exports[name]
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def random_string(length=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
@@ -881,7 +896,7 @@ class CoefTweakerWidget(anywidget.AnyWidget):
             adapter = get_adapter(self.task)
             self.is_2afc = adapter.num_classes == 2
             
-            df_all = pl.read_parquet(paths.DATA_PATH / adapter.data_file)
+            df_all = adapter.read_dataset()
             df_all = adapter.subject_filter(df_all)
             
             subjects = sorted(df_all["subject"].unique().to_list(), key=str)

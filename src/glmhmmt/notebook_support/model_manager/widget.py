@@ -177,12 +177,23 @@ class model_cfg:
     cv_mode: str = "none"
     cv_repeats: int = 5
     condition_filter: str = "all"
-    lapse: bool = False
+    lapse_mode: str = "none"
     lapse_max: float = 0.2
     emission_cols: list[str] = field(default_factory=list)
     transition_cols: list[str] = field(default_factory=list)
     frozen_emissions: dict[str, Any] = field(default_factory=dict)
     run_fit_clicks: int = 0
+
+    @property
+    def lapse(self) -> bool:
+        return str(self.lapse_mode) != "none"
+
+    @property
+    def normalized_lapse_mode(self) -> str:
+        mode = str(self.lapse_mode).strip().lower()
+        if mode in {"repeat", "alternate", "repeat_alternate"}:
+            return "history"
+        return mode
 
     @classmethod
     def from_value(cls, value: dict[str, Any]) -> "model_cfg":
@@ -198,7 +209,11 @@ class model_cfg:
             cv_mode=_normalize_cv_mode(value.get("cv_mode", "none")),
             cv_repeats=int(value.get("cv_repeats", 5)),
             condition_filter=str(value.get("condition_filter", "all")),
-            lapse=bool(value.get("lapse", False)),
+            lapse_mode=(
+                "history"
+                if str(value.get("lapse_mode", "")).strip().lower() in {"repeat", "alternate", "repeat_alternate"}
+                else str(value.get("lapse_mode", "class" if value.get("lapse", False) else "none"))
+            ),
             lapse_max=float(value.get("lapse_max", 0.2)),
             emission_cols=list(value.get("emission_cols", [])),
             transition_cols=list(value.get("transition_cols", [])),
@@ -242,7 +257,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
     condition_filter = traitlets.Unicode("all").tag(sync=True)
     show_condition_filter = traitlets.Bool(False).tag(sync=True)
 
-    lapse     = traitlets.Bool(False).tag(sync=True)
+    lapse_mode = traitlets.Unicode("none").tag(sync=True)
     lapse_max = traitlets.Float(0.2).tag(sync=True)
 
     emission_cols_options = traitlets.List(traitlets.Unicode()).tag(sync=True)
@@ -282,7 +297,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "cv_mode": self.cv_mode,
                 "cv_repeats": int(self.cv_repeats),
                 "condition_filter": self.condition_filter,
-                "lapse": bool(self.lapse),
+                "lapse_mode": str(self.normalized_lapse_mode),
                 "lapse_max": float(self.lapse_max),
                 "emission_cols": list(self.emission_cols),
                 "transition_cols": list(self.transition_cols),
@@ -384,8 +399,9 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if isinstance(k, int):
             self.K = k
         self.frozen_emissions = serialize_frozen_emissions(cfg.get("frozen_emissions", {}))
-        if "lapse" in cfg:
-            self.lapse = bool(cfg["lapse"])
+        if "lapse_mode" in cfg or "lapse" in cfg:
+            raw_mode = str(cfg.get("lapse_mode", "class" if cfg.get("lapse", False) else "none"))
+            self.lapse_mode = "history" if raw_mode.strip().lower() in {"repeat", "alternate", "repeat_alternate"} else raw_mode
         if "lapse_max" in cfg:
             self.lapse_max = float(cfg["lapse_max"])
         self.alias = display_name
@@ -398,7 +414,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         """Reset widget traitlets to the adapter's default configuration."""
         try:
             adapter = get_adapter(self.task)
-            df_all  = pl.read_parquet(_paths().DATA_PATH / adapter.data_file)
+            df_all  = adapter.read_dataset()
             df_all  = adapter.subject_filter(df_all)
             subjects = sorted(df_all["subject"].unique().to_list(), key=str)
             self.subjects  = subjects
@@ -407,7 +423,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
             self.cv_mode   = "none"
             self.cv_repeats = 5
             self.condition_filter = "all"
-            self.lapse     = False
+            self.lapse_mode = "none"
             self.lapse_max = 0.2
             is_2afc = adapter.num_classes == 2
             available_ecols = adapter.available_emission_cols(df_all)
@@ -473,7 +489,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if self._supports_condition_filter():
             cfg["condition_filter"] = self.condition_filter
         if self.model_type == "glm":
-            cfg["lapse"] = bool(self.lapse)
+            cfg["lapse_mode"] = str(self.normalized_lapse_mode)
             cfg["lapse_max"] = float(self.lapse_max)
         else:
             cfg["K_list"] = [int(self.K)]
@@ -508,7 +524,12 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
         if self.model_type == "glm":
             return (
-                bool(saved.get("lapse", False)) == bool(self.lapse)
+                (
+                    "history"
+                    if str(saved.get("lapse_mode", "class" if saved.get("lapse", False) else "none")).strip().lower()
+                    in {"repeat", "alternate", "repeat_alternate"}
+                    else str(saved.get("lapse_mode", "class" if saved.get("lapse", False) else "none"))
+                ) == str(self.normalized_lapse_mode)
                 and float(saved.get("lapse_max", 0.2)) == float(self.lapse_max)
             )
 
@@ -675,7 +696,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
             elif self.condition_filter not in _CONDITION_FILTER_OPTIONS:
                 self.condition_filter = "all"
 
-            df_all   = pl.read_parquet(_paths().DATA_PATH / adapter.data_file)
+            df_all   = adapter.read_dataset()
             df_all   = adapter.subject_filter(df_all)
             subjects = sorted(df_all["subject"].unique().to_list(), key=str)
 

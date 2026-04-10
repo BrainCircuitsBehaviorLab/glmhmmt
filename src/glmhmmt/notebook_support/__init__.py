@@ -10,7 +10,7 @@ __all__ = [
     "apply_state_tweak_to_view",
     "build_editor_payload",
     "CoefficientEditorWidget",
-    "make_plot_saver",
+    "CoefTweakerWidget",
     "ModelManagerWidget",
     "model_cfg",
 ]
@@ -33,7 +33,7 @@ _LAZY_IMPORTS = {
         "glmhmmt.notebook_support.coefficient_editor_widget",
         "CoefficientEditorWidget",
     ),
-    "make_plot_saver": ("glmhmmt.notebook_support.figure_save_utils", "make_plot_saver"),
+    "CoefTweakerWidget": ("glmhmmt.notebook_support.widgets", "CoefTweakerWidget"),
     "ModelManagerWidget": ("glmhmmt.notebook_support.model_manager", "ModelManagerWidget"),
     "model_cfg": ("glmhmmt.notebook_support.model_manager", "model_cfg"),
 }

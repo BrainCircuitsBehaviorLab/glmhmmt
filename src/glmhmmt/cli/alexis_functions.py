@@ -20,11 +20,15 @@ from collections import namedtuple
 import time
 from functools import wraps
 
-from glmhmmt.runtime import get_alexis_dir
+from glmhmmt.runtime import get_data_dir
 
 # For saving all figures in a notebook
 import nbformat
 import base64
+
+
+def _alexis_dir() -> Path:
+    return get_data_dir() / "Alexis"
 
 
 def power_dB(amp):
@@ -41,7 +45,7 @@ def ild():
     """Get the inter aural level difference (ild) of a sound given its evidence (-1=left, 1=right).
     The input should be a csv file to convert to DataFrame. Only for sounds.csv (batch 1)
     """
-    path = get_alexis_dir() / 'sounds.csv'  # My laptop
+    path = _alexis_dir() / 'sounds.csv'  # My laptop
     df = pd.read_csv(path)
     # behavior_filenames = pd.read_csv(path).drop('filename', 1)  # Import csv as DataFrame dropping the column 'filename'
     df_dB = df  # Copy DataFrame
@@ -71,11 +75,11 @@ def ild():
 def get_ild(stim_set=6):
     # Load sounds
     if stim_set == 1:
-        sounds_path = get_alexis_dir() / 'sounds.csv'
+        sounds_path = _alexis_dir() / 'sounds.csv'
     if stim_set == 2:
-        sounds_path = get_alexis_dir() / 'sounds_2.csv'
+        sounds_path = _alexis_dir() / 'sounds_2.csv'
     elif stim_set == 6:
-        sounds_path = get_alexis_dir() / 'sounds_6.1.csv'
+        sounds_path = _alexis_dir() / 'sounds_6.1.csv'
 
     sounds = pd.read_csv(sounds_path)
     n_frames = sounds.n_frames.unique()[0]
@@ -168,7 +172,7 @@ def get_experiment(experiment=None, path_session='glue_sessions'):
     """
 
     if experiment is None:
-        path_experiment = get_alexis_dir()  # Where the data for all animals is
+        path_experiment = _alexis_dir()  # Where the data for all animals is
         experiments = list(path_experiment.iterdir())  # List experiments
         experiments.sort()  # Sort them by name
         experiments = [x.name for x in path_experiment.iterdir() if x.is_dir()]  # Get rid of non folders
@@ -180,10 +184,10 @@ def get_experiment(experiment=None, path_session='glue_sessions'):
 
         print('Experiments:\n ' + str(experiments)[1:-1])  # Remove square brackets
         experiment = input('Enter experiment name')
-        path_experiment = get_alexis_dir() / experiment  # Where the data for the animal is
+        path_experiment = _alexis_dir() / experiment  # Where the data for the animal is
 
     else:
-        path_experiment = get_alexis_dir() / experiment
+        path_experiment = _alexis_dir() / experiment
 
     return experiment, path_experiment
 
@@ -267,11 +271,11 @@ def make_frames_dm(df, stim_set=6, residuals=True, zscore=False):
 
     # Load sounds
     if stim_set == 1:
-        sounds_path = get_alexis_dir() / 'sounds.csv'
+        sounds_path = _alexis_dir() / 'sounds.csv'
     if stim_set == 2:
-        sounds_path = get_alexis_dir() / 'sounds_2.csv'
+        sounds_path = _alexis_dir() / 'sounds_2.csv'
     elif stim_set == 6:
-        sounds_path = get_alexis_dir() / 'sounds_6.1.csv'
+        sounds_path = _alexis_dir() / 'sounds_6.1.csv'
 
     sounds = pd.read_csv(sounds_path)
     n_frames = sounds.n_frames.unique()[0]

@@ -1759,6 +1759,124 @@ def plot_binary_emission_weights(
     )
 
 
+def _default_lapse_choice_labels(num_classes: int) -> list[str]:
+    if num_classes == 2:
+        return ["Left", "Right"]
+    if num_classes == 3:
+        return ["Left", "Center", "Right"]
+    return [f"Class {idx}" for idx in range(num_classes)]
+
+
+def _format_lapse_axis_labels(
+    lapse_mode: str,
+    lapse_labels: Sequence[str],
+    *,
+    choice_labels: Sequence[str],
+) -> list[str]:
+    formatted: list[str] = []
+    for idx, raw in enumerate(lapse_labels):
+        choice = choice_labels[idx] if idx < len(choice_labels) else f"Class {idx}"
+        if lapse_mode == "class":
+            formatted.append(choice)
+        elif lapse_mode == "history" and raw.startswith("repeat_prev_"):
+            formatted.append(f"Repeat after {choice}")
+        elif lapse_mode == "history" and raw.startswith("alternate_prev_"):
+            formatted.append(f"Alternate after {choice}")
+        else:
+            formatted.append(raw)
+    return formatted
+
+
+def plot_lapse_rates_boxplot(
+    views: dict,
+    K: int | None = None,
+    *,
+    choice_labels: Sequence[str] | None = None,
+    title: str | None = None,
+) -> plt.Figure:
+    _ = K
+    records: list[dict[str, object]] = []
+    selected = [view for view in views.values() if view is not None]
+    if not selected:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No data", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    num_classes = max(
+        (
+            len(np.asarray(getattr(view, "lapse_rates", []), dtype=float))
+            for view in selected
+            if getattr(view, "lapse_rates", None) is not None
+        ),
+        default=0,
+    )
+    resolved_choice_labels = list(choice_labels) if choice_labels is not None else _default_lapse_choice_labels(num_classes)
+
+    for view in selected:
+        lapse_rates = np.asarray(getattr(view, "lapse_rates", []), dtype=float)
+        if lapse_rates.size == 0 or not np.any(np.isfinite(lapse_rates)):
+            continue
+        lapse_mode = str(getattr(view, "lapse_mode", "none"))
+        if lapse_mode == "none" or not np.any(lapse_rates > 0):
+            continue
+        raw_labels = tuple(getattr(view, "lapse_labels", ())) or tuple(f"class_{idx}" for idx in range(lapse_rates.size))
+        display_labels = _format_lapse_axis_labels(
+            lapse_mode,
+            raw_labels,
+            choice_labels=resolved_choice_labels,
+        )
+        for label, rate in zip(display_labels, lapse_rates, strict=False):
+            records.append(
+                {
+                    "Subject": getattr(view, "subject", ""),
+                    "Lapse": label,
+                    "Rate": float(rate),
+                    "Mode": lapse_mode,
+                }
+            )
+
+    if not records:
+        fig, ax = plt.subplots(figsize=(5.0, 4.0))
+        ax.text(0.5, 0.5, "No fitted lapses", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    df = pd.DataFrame(records)
+    order = list(dict.fromkeys(df["Lapse"].tolist()))
+    fig, ax = plt.subplots(figsize=(max(5.5, 1.5 * len(order)), 4.2))
+    sns.boxplot(
+        data=df,
+        x="Lapse",
+        y="Rate",
+        ax=ax,
+        color="#D9E6F2",
+        width=0.6,
+        showfliers=False,
+        boxprops={"alpha": 0.85},
+    )
+    sns.stripplot(
+        data=df,
+        x="Lapse",
+        y="Rate",
+        order=order,
+        ax=ax,
+        color="#355C7D",
+        alpha=0.7,
+        jitter=0.18,
+        size=5,
+        zorder=2,
+    )
+    ax.set_xlabel("")
+    ax.set_ylabel("Lapse rate")
+    ax.set_ylim(bottom=0.0)
+    ax.set_title(title or "Lapse rates")
+    ax.tick_params(axis="x", rotation=18)
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
 def _default_state_labels(K: int) -> list[str]:
     if K == 1:
         return ["State 0"]

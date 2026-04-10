@@ -9,7 +9,6 @@ import os
 from dynamax.utils.plotting import gradient_cmap
 from glmhmmt.model import SoftmaxGLMHMM
 
-from glmhmmt.runtime import get_data_dir
 from glmhmmt.tasks import get_adapter
 
 adapter = get_adapter("mcdr")
@@ -26,7 +25,7 @@ color_names = [
 colors = sns.xkcd_palette(color_names)
 cmap = gradient_cmap(colors)    
 
-df = pl.read_parquet(get_data_dir() / adapter.data_file)
+df = adapter.read_dataset()
 y, X, U, names = adapter.load_subject(df.filter(pl.col("subject") == "A89"))
 
 num_states= 2        # nº estados
@@ -155,13 +154,13 @@ df_sub = df.filter(pl.col("subject") == "A89").sort("trial_idx")
 
 df_sub = df_sub.with_columns([pl.Series("pL", pL), pl.Series("pC", pC), pl.Series("pR", pR), pl.Series("pred_choice", np.argmax(p_pred, axis=1))])
 
-df_sub.write_parquet(get_data_dir() / "predictions.parquet")
+df_sub.write_parquet(adapter.dataset_path().parent / "predictions.parquet")
 
 plot_df = plots.prepare_predictions_df(df_sub)
 
 plots.plot_categorical_performance_all(plot_df, "glmhmm")
 
-print("Saved:", get_data_dir() / "predictions.parquet")
+print("Saved:", adapter.dataset_path().parent / "predictions.parquet")
 
 # --- Transition weights ---
 import pandas as pd
