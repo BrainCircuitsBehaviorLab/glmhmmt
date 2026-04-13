@@ -98,6 +98,40 @@ def test_fit_glm_history_mode_uses_shared_repeat_and_skips_first_trial(monkeypat
     np.testing.assert_allclose(fit.lapse_rates, np.array([0.30, 0.10]))
 
 
+def test_fit_glm_history_mode_uses_single_shared_constraint(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _mock_minimize(fun, x0, method=None, bounds=None, constraints=(), **kwargs):
+        captured["method"] = method
+        captured["constraints"] = constraints
+        x = np.asarray(x0, dtype=float)
+        return SimpleNamespace(x=x, fun=float(fun(x)), success=True)
+
+    monkeypatch.setattr("glmhmmt.glm.minimize", _mock_minimize)
+
+    X = np.zeros((4, 1), dtype=float)
+    y = np.array([1, 1, 0, 1], dtype=int)
+    fit_glm(
+        X,
+        y,
+        num_classes=2,
+        lapse_mode="history",
+        lapse_max=1.0,
+        n_restarts=1,
+        restart_noise_scale=0.0,
+    )
+
+    constraints = captured["constraints"]
+    assert captured["method"] == "SLSQP"
+    assert len(constraints) == 1
+
+    constraint_fun = constraints[0]["fun"]
+    np.testing.assert_allclose(
+        constraint_fun(np.array([0.0, 0.20, 0.30], dtype=float)),
+        0.5,
+    )
+
+
 def test_fit_glm_history_conditioned_alternate_component_splits_across_non_previous_classes(monkeypatch):
     monkeypatch.setattr(
         "glmhmmt.glm.minimize",

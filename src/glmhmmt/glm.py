@@ -291,6 +291,13 @@ def fit_glm(
                 "fun": lambda w_flat, offset=weight_dim, size=lapse_size: 1.0
                 - np.sum(w_flat[offset : offset + size]),
             },)
+        elif lapse_mode == "history":
+            constraints = ({
+                "type": "ineq",
+                "fun": lambda w_flat, offset=weight_dim: 1.0
+                - w_flat[offset]
+                - w_flat[offset + 1],
+            },)
         else:
             constraints = tuple(
                 {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8
+
+- Fixed the shared `history` lapse-mode optimizer constraints so binary GLMs no longer index past the two shared repeat/alternate lapse parameters.
+- Added a regression test covering the shared-history constraint path used by the SLSQP optimizer.
+
 ## 0.1.7
 
 - Reload local task plot modules when their source file changes instead of caching them forever by path alone.
