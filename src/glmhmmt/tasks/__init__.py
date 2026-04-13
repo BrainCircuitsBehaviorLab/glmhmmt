@@ -224,7 +224,7 @@ class TaskAdapter(ABC):
 _REGISTRY: dict[str, type[TaskAdapter]] = {}
 _ENTRY_POINTS_LOADED = False
 _LOCAL_TASK_PATHS_LOADED: set[Path] = set()
-_LOCAL_PLOT_MODULES_LOADED: dict[Path, types.ModuleType] = {}
+_LOCAL_PLOT_MODULES_LOADED: dict[Path, tuple[types.ModuleType, tuple[int, int]]] = {}
 _LOCAL_TASK_IMPORT_ROOT = "glmhmmt_local_tasks"
 _LOCAL_PLOT_IMPORT_ROOT = "glmhmmt_local_plots"
 
@@ -427,14 +427,21 @@ def _load_module_from_path(
     module_path: Path,
     *,
     import_root: str,
-    loaded_modules: dict[Path, types.ModuleType],
+    loaded_modules: dict[Path, tuple[types.ModuleType, tuple[int, int]]],
 ) -> types.ModuleType:
     resolved = module_path.resolve()
+    stat = resolved.stat()
+    signature = (stat.st_mtime_ns, stat.st_size)
+
     cached = loaded_modules.get(resolved)
     if cached is not None:
-        return cached
+        cached_module, cached_signature = cached
+        if cached_signature == signature:
+            return cached_module
 
-    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(
+        f"{resolved}:{signature[0]}:{signature[1]}".encode("utf-8")
+    ).hexdigest()[:12]
     module_name = f"{import_root}.{resolved.stem}_{digest}"
     spec = spec_from_file_location(module_name, resolved)
     if spec is None or spec.loader is None:
@@ -448,7 +455,7 @@ def _load_module_from_path(
         sys.modules.pop(module_name, None)
         raise
 
-    loaded_modules[resolved] = module
+    loaded_modules[resolved] = (module, signature)
     return module
 
 

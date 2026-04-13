@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Reload local task plot modules when their source file changes instead of caching them forever by path alone.
+- Prevent stale `src/plots/*.py` imports from surviving notebook edits and causing attribute mismatches in marimo sessions.
+
 ## 0.1.6
 
 - Dropped wrapper-level anywidget UIElement caching so marimo rebuilds widget views with a fresh virtual-file JavaScript module on each rerun.
