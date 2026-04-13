@@ -263,8 +263,8 @@ if __name__ == "__main__":
         "--lapse_mode",
         type=str,
         default="none",
-        choices=["none", "class", "history"],
-        help="Lapse model to fit: none, class, or history.",
+        choices=["none", "class", "history", "history_conditioned"],
+        help="Lapse model to fit: none, class, history, or history_conditioned.",
     )
     parser.add_argument("--lapse_max", type=float, default=0.2,
                         help="Upper bound for each lapse rate (default 0.20)")

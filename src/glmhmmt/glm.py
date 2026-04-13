@@ -8,7 +8,7 @@ from scipy.optimize import minimize
 from scipy.special import expit, softmax
 
 
-LAPSE_MODES = {"none", "class", "history"}
+LAPSE_MODES = {"none", "class", "history", "history_conditioned"}
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,8 @@ def _num_lapse_params(num_classes: int, lapse_mode: str) -> int:
     if lapse_mode == "none":
         return 0
     if lapse_mode == "history":
+        return 2
+    if lapse_mode == "history_conditioned":
         return 2 * num_classes
     return num_classes
 
@@ -95,6 +97,8 @@ def _lapse_labels(num_classes: int, lapse_mode: str) -> tuple[str, ...]:
         return tuple(f"class_{idx}" for idx in range(num_classes))
     if lapse_mode == "class":
         return tuple(f"class_{idx}" for idx in range(num_classes))
+    if lapse_mode == "history":
+        return ("repeat", "alternate")
     return tuple(f"repeat_prev_{idx}" for idx in range(num_classes)) + tuple(
         f"alternate_prev_{idx}" for idx in range(num_classes)
     )
@@ -117,6 +121,10 @@ def _project_lapse_params(
         if lapse_sum > 1.0:
             lapse_rates /= lapse_sum
     elif lapse_mode == "history":
+        pair_sum = float(lapse_rates[0] + lapse_rates[1])
+        if pair_sum > 1.0:
+            lapse_rates /= pair_sum
+    elif lapse_mode == "history_conditioned":
         repeat_rates = lapse_rates[:num_classes]
         alternate_rates = lapse_rates[num_classes:]
         for idx in range(num_classes):
@@ -195,18 +203,27 @@ def _apply_lapse_mode(
         total_mass = float(lapse_rates.sum())
         return lapse_rates[None, :] + (1.0 - total_mass) * probs
 
-    repeat_rates = lapse_rates[:num_classes]
-    alternate_rates = lapse_rates[num_classes:]
     repeat_targets = _history_repeat_targets(y_np, num_classes)
     alternate_targets = _history_alternate_targets(y_np, num_classes)
     if probs.shape[0] > 0:
         trial_mass = np.zeros(probs.shape[0], dtype=float)
-        if probs.shape[0] > 1:
-            prev = y_np[:-1]
-            trial_mass[1:] = repeat_rates[prev] + alternate_rates[prev]
-        adjusted = probs * (1.0 - trial_mass[:, None])
-        adjusted += repeat_targets * np.concatenate([[0.0], repeat_rates[y_np[:-1]]])[:, None]
-        adjusted += alternate_targets * np.concatenate([[0.0], alternate_rates[y_np[:-1]]])[:, None]
+        if lapse_mode == "history":
+            repeat_rate = float(lapse_rates[0])
+            alternate_rate = float(lapse_rates[1])
+            if probs.shape[0] > 1:
+                trial_mass[1:] = repeat_rate + alternate_rate
+            adjusted = probs * (1.0 - trial_mass[:, None])
+            adjusted += repeat_targets * np.concatenate([[0.0], np.full(probs.shape[0] - 1, repeat_rate)])[:, None]
+            adjusted += alternate_targets * np.concatenate([[0.0], np.full(probs.shape[0] - 1, alternate_rate)])[:, None]
+        else:
+            repeat_rates = lapse_rates[:num_classes]
+            alternate_rates = lapse_rates[num_classes:]
+            if probs.shape[0] > 1:
+                prev = y_np[:-1]
+                trial_mass[1:] = repeat_rates[prev] + alternate_rates[prev]
+            adjusted = probs * (1.0 - trial_mass[:, None])
+            adjusted += repeat_targets * np.concatenate([[0.0], repeat_rates[y_np[:-1]]])[:, None]
+            adjusted += alternate_targets * np.concatenate([[0.0], alternate_rates[y_np[:-1]]])[:, None]
         adjusted[0] = probs[0]
         return adjusted
     return probs

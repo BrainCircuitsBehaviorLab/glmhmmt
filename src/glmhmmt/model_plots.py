@@ -1775,6 +1775,14 @@ def _format_lapse_axis_labels(
 ) -> list[str]:
     formatted: list[str] = []
     for idx, raw in enumerate(lapse_labels):
+        raw = str(raw)
+        if lapse_mode == "history":
+            if raw == "repeat":
+                formatted.append("Repeat")
+                continue
+            if raw == "alternate":
+                formatted.append("Alternate")
+                continue
         choice_idx = idx
         if "_prev_" in raw:
             try:
@@ -1784,9 +1792,9 @@ def _format_lapse_axis_labels(
         choice = choice_labels[choice_idx] if choice_idx < len(choice_labels) else f"Class {choice_idx}"
         if lapse_mode == "class":
             formatted.append(choice)
-        elif lapse_mode == "history" and raw.startswith("repeat_prev_"):
+        elif lapse_mode == "history_conditioned" and raw.startswith("repeat_prev_"):
             formatted.append(f"Repeat after {choice}")
-        elif lapse_mode == "history" and raw.startswith("alternate_prev_"):
+        elif lapse_mode == "history_conditioned" and raw.startswith("alternate_prev_"):
             formatted.append(f"Alternate after {choice}")
         else:
             formatted.append(raw)
@@ -1798,6 +1806,8 @@ def plot_lapse_rates_boxplot(
     K: int | None = None,
     *,
     choice_labels: Sequence[str] | None = None,
+    collapse_history_choices: bool = False,
+    annotate_significance: bool = True,
     title: str | None = None,
 ) -> plt.Figure:
     _ = K
@@ -1833,10 +1843,17 @@ def plot_lapse_rates_boxplot(
             choice_labels=resolved_choice_labels,
         )
         for label, rate in zip(display_labels, lapse_rates, strict=False):
+            collapsed_label = label
+            if collapse_history_choices and lapse_mode == "history_conditioned":
+                if str(label).startswith("Repeat after "):
+                    collapsed_label = "Repeat"
+                elif str(label).startswith("Alternate after "):
+                    collapsed_label = "Alternate"
             records.append(
                 {
                     "Subject": getattr(view, "subject", ""),
                     "Lapse": label,
+                    "CollapsedLapse": collapsed_label,
                     "Rate": float(rate),
                     "Mode": lapse_mode,
                 }
@@ -1849,14 +1866,20 @@ def plot_lapse_rates_boxplot(
         return fig
 
     df = pd.DataFrame(records)
-    order = list(dict.fromkeys(df["Lapse"].tolist()))
+    label_col = "CollapsedLapse" if collapse_history_choices else "Lapse"
+    order = list(dict.fromkeys(df[label_col].tolist()))
+    if collapse_history_choices:
+        df = (
+            df.groupby(["Subject", label_col], as_index=False)["Rate"]
+            .mean()
+        )
     fig, ax = plt.subplots(figsize=(max(5.5, 1.5 * len(order)), 4.2))
     grouped_rates = [
-        df.loc[df["Lapse"] == label, "Rate"].dropna().to_numpy(dtype=float)
+        df.loc[df[label_col] == label, "Rate"].dropna().to_numpy(dtype=float)
         for label in order
     ]
     subject_lines = (
-        df.pivot_table(index="Subject", columns="Lapse", values="Rate", aggfunc="first")
+        df.pivot_table(index="Subject", columns=label_col, values="Rate", aggfunc="first")
         .reindex(columns=order)
         .to_numpy(dtype=float)
     )
@@ -1866,8 +1889,8 @@ def plot_lapse_rates_boxplot(
         positions=np.arange(len(order)),
         widths=0.58,
         median_colors=["#355C7D"] * len(order),
-        box_facecolor="#D9E6F2",
-        box_alpha=0.85,
+        box_facecolor="white",
+        box_alpha=1.0,
         line_values=subject_lines,
         line_color="#355C7D",
         line_alpha=0.25,
@@ -1875,9 +1898,63 @@ def plot_lapse_rates_boxplot(
         showfliers=False,
         zorder=1,
     )
+    if annotate_significance and len(order) >= 2:
+        def _star(pval: float) -> str:
+            if pval < 0.001:
+                return "***"
+            if pval < 0.01:
+                return "**"
+            if pval < 0.05:
+                return "*"
+            return "ns"
+
+        paired = (
+            df.pivot_table(index="Subject", columns=label_col, values="Rate", aggfunc="first")
+            .reindex(columns=order)
+        )
+        finite_groups = [vals[np.isfinite(vals)] for vals in grouped_rates if vals.size > 0]
+        finite = np.concatenate(finite_groups) if finite_groups else np.array([], dtype=float)
+        y_min = float(finite.min()) if finite.size else 0.0
+        y_max = float(finite.max()) if finite.size else 1.0
+        y_range = y_max - y_min
+        if y_range <= 0:
+            y_range = max(y_max, 1.0)
+        y_offset_step = y_range * 0.08
+        bar_height = y_range * 0.03
+        current_y = y_max + y_offset_step
+        positions = np.arange(len(order), dtype=float)
+
+        for left_idx in range(len(order)):
+            for right_idx in range(left_idx + 1, len(order)):
+                pair = paired.iloc[:, [left_idx, right_idx]].dropna()
+                if len(pair) < 2:
+                    continue
+                _, pval = ttest_rel(pair.iloc[:, 0], pair.iloc[:, 1])
+                label = _star(float(pval))
+                x1 = positions[left_idx]
+                x2 = positions[right_idx]
+                ax.plot(
+                    [x1, x1, x2, x2],
+                    [current_y, current_y + bar_height, current_y + bar_height, current_y],
+                    lw=1.0,
+                    c="k",
+                )
+                ax.text(
+                    (x1 + x2) / 2,
+                    current_y + bar_height,
+                    label,
+                    ha="center",
+                    va="bottom",
+                    color="k",
+                )
+                current_y += y_offset_step
+
     ax.set_xlabel("")
     ax.set_ylabel("Lapse rate")
     ax.set_ylim(bottom=0.0)
+    top_ylim = ax.get_ylim()[1]
+    if annotate_significance and len(order) >= 2:
+        ax.set_ylim(0.0, max(top_ylim, current_y + y_offset_step * 0.5))
     ax.set_title(title or "Lapse rates")
     ax.set_xticks(np.arange(len(order)))
     ax.set_xticklabels(order, rotation=18)

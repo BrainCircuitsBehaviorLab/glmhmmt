@@ -647,7 +647,8 @@ function render({ model, el }) {
                 <select id="inp-lapse-mode" class="mm-input small">
                   <option value="none" ${currentLapseMode === "none" ? "selected" : ""}>none</option>
                   <option value="class" ${currentLapseMode === "class" ? "selected" : ""}>class</option>
-                  <option value="history" ${currentLapseMode === "history" ? "selected" : ""}>repeat/alternate</option>
+                  <option value="history" ${currentLapseMode === "history" ? "selected" : ""}>repeat/alternate (shared)</option>
+                  <option value="history_conditioned" ${currentLapseMode === "history_conditioned" ? "selected" : ""}>repeat/alternate (conditioned)</option>
                 </select>
               </div>
               <div class="mm-slider-wrap tight ${currentLapseMode === "none" ? "disabled" : ""}">

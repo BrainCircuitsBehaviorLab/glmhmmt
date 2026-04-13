@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Split history lapses into two explicit modes: `history` now fits shared repeat/alternate lapse rates, while `history_conditioned` preserves the per-previous-choice formulation.
+- Updated the CLI and notebook model manager to expose both history lapse modes explicitly.
+- Extended the lapse-rate boxplot to support collapsing conditioned history lapses into shared repeat/alternate summaries, add pairwise significance annotations, and keep the custom white box styling.
+
 ## 0.1.4
 
 - Fixed the marimo anywidget compatibility layer to serve widget JavaScript through marimo-managed virtual files instead of embedding untrusted `data:` URLs.
