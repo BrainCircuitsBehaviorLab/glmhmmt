@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Dropped wrapper-level anywidget UIElement caching so marimo rebuilds widget views with a fresh virtual-file JavaScript module on each rerun.
+- Preserved stable anywidget model ids by continuing to initialize the underlying widget comm before constructing the marimo wrapper.
+
 ## 0.1.5
 
 - Split history lapses into two explicit modes: `history` now fits shared repeat/alternate lapse rates, while `history_conditioned` preserves the per-previous-choice formulation.

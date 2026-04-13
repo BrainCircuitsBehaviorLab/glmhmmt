@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from weakref import WeakKeyDictionary
-
 import marimo._output.data.data as mo_data
 from marimo._plugins.ui._core.ui_element import UIElement
 from marimo._plugins.ui._impl.from_anywidget import (
@@ -12,7 +10,7 @@ from marimo._utils.code import hash_code
 
 
 class _StableAnyWidget(MarimoAnyWidget):
-    """Marimo anywidget wrapper with stable model-id based caching."""
+    """Marimo anywidget wrapper that keeps the widget model-id stable."""
 
     def __init__(self, widget):
         self.widget = widget
@@ -39,15 +37,8 @@ class _StableAnyWidget(MarimoAnyWidget):
             on_change=None,
         )
 
-
-_WIDGET_CACHE: WeakKeyDictionary[object, _StableAnyWidget] = WeakKeyDictionary()
-
-
 def wrap_anywidget(widget):
-    cached = _WIDGET_CACHE.get(widget)
-    if cached is not None:
-        return cached
-
-    wrapped = _StableAnyWidget(widget)
-    _WIDGET_CACHE[widget] = wrapped
-    return wrapped
+    # Rebuild the marimo UIElement on each call so its virtual-file-backed
+    # JS module belongs to the current cell lifecycle. Caching the wrapper can
+    # leave a stale `@file/...js` URL behind after notebook reruns.
+    return _StableAnyWidget(widget)
