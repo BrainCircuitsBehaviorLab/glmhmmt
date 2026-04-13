@@ -1851,33 +1851,36 @@ def plot_lapse_rates_boxplot(
     df = pd.DataFrame(records)
     order = list(dict.fromkeys(df["Lapse"].tolist()))
     fig, ax = plt.subplots(figsize=(max(5.5, 1.5 * len(order)), 4.2))
-    sns.boxplot(
-        data=df,
-        x="Lapse",
-        y="Rate",
-        ax=ax,
-        color="#D9E6F2",
-        width=0.6,
-        showfliers=False,
-        boxprops={"alpha": 0.85},
+    grouped_rates = [
+        df.loc[df["Lapse"] == label, "Rate"].dropna().to_numpy(dtype=float)
+        for label in order
+    ]
+    subject_lines = (
+        df.pivot_table(index="Subject", columns="Lapse", values="Rate", aggfunc="first")
+        .reindex(columns=order)
+        .to_numpy(dtype=float)
     )
-    sns.stripplot(
-        data=df,
-        x="Lapse",
-        y="Rate",
-        order=order,
-        ax=ax,
-        color="#355C7D",
-        alpha=0.7,
-        jitter=0.18,
-        size=5,
-        zorder=2,
+    custom_boxplot(
+        ax,
+        grouped_rates,
+        positions=np.arange(len(order)),
+        widths=0.58,
+        median_colors=["#355C7D"] * len(order),
+        box_facecolor="#D9E6F2",
+        box_alpha=0.85,
+        line_values=subject_lines,
+        line_color="#355C7D",
+        line_alpha=0.25,
+        line_linewidth=1.1,
+        showfliers=False,
+        zorder=1,
     )
     ax.set_xlabel("")
     ax.set_ylabel("Lapse rate")
     ax.set_ylim(bottom=0.0)
     ax.set_title(title or "Lapse rates")
-    ax.tick_params(axis="x", rotation=18)
+    ax.set_xticks(np.arange(len(order)))
+    ax.set_xticklabels(order, rotation=18)
     sns.despine(fig=fig)
     fig.tight_layout()
     return fig

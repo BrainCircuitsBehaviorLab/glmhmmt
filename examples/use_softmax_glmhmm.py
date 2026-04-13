@@ -45,6 +45,7 @@ def main() -> None:
     )
 
     pred = model.predict_choice_probs_multisession(fitted_params, y, inputs, session_ids)
+    transition = model.get_transition_matrices(fitted_params)
     print("log_probs:", log_probs)
     print("pred shape:", pred.shape)
 
