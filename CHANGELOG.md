@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Fixed the marimo anywidget compatibility layer to serve widget JavaScript through marimo-managed virtual files instead of embedding untrusted `data:` URLs.
+- Updated the notebook dependency pin to `anywidget==0.10.0` for compatibility with the latest marimo release.
+
 ## 0.1.3
 
 - Restored `lapse_mode="history"` as a true probability lapse model with per-previous-choice `repeat` and `alternate` lapse parameters.
