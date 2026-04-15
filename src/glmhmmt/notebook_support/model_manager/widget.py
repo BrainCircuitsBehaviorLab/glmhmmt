@@ -62,9 +62,12 @@ _MCDR_EMISSION_GROUPS: list[dict] = [
 
 _2AFC_EMISSION_GROUPS: list[dict] = [
     {"key": "bias",          "label": "bias",            "members": {"N": "bias"}},
+    {"key": "bias_param",    "label": "bias param",      "members": {"N": "bias_param"}},
     {"key": "stim_vals",     "label": "stim vals",       "members": {"N": "stim_vals"}},
+    {"key": "stim_param",    "label": "stim param",      "members": {"N": "stim_param"}},
     {"key": "stim_strength", "label": "stim strength",   "members": {"N": "stim_strength"}},
     {"key": "at_choice",     "label": "action (choice)", "members": {"N": "at_choice"}},
+    {"key": "at_choice_param", "label": "choice param",  "members": {"N": "at_choice_param"}},
     {"key": "at_error",      "label": "action (error)",  "members": {"N": "at_error"}},
     {"key": "at_correct",    "label": "action (correct)","members": {"N": "at_correct"}},
     {"key": "reward_trace",  "label": "reward trace",    "members": {"N": "reward_trace"}},
@@ -112,6 +115,109 @@ def _build_regressor_groups(available_cols: list[str], registry: list[dict]) -> 
             registered.update(filtered.values())
 
     # Append any column not yet covered as a singleton group
+    for col in available_cols:
+        if col not in registered:
+            result.append({"key": col, "label": col, "members": {"N": col}})
+
+    return result
+
+
+def _numeric_suffix(name: str, prefix: str) -> tuple[int, str]:
+    suffix = name.removeprefix(prefix)
+    return (int(suffix), name) if suffix.isdigit() else (10**9, name)
+
+
+def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
+    """Build the 2AFC selector groups, hiding one-hot families behind row toggles."""
+    available = set(available_cols)
+    result: list[dict] = []
+    registered: set[str] = set()
+
+    def add_scalar(group: dict) -> None:
+        filtered = {k: v for k, v in group["members"].items() if v in available}
+        if not filtered:
+            return
+        result.append({**group, "members": filtered})
+        registered.update(filtered.values())
+
+    def add_hidden_family(
+        *,
+        key: str,
+        label: str,
+        family_cols: list[str],
+        toggle_cols: list[str] | None = None,
+    ) -> None:
+        if not family_cols:
+            return
+        members = list(toggle_cols if toggle_cols is not None else family_cols)
+        if not members:
+            registered.update(family_cols)
+            return
+        result.append(
+            {
+                "key": key,
+                "label": label,
+                "members": {},
+                "toggle_members": members,
+                "hide_members": True,
+            }
+        )
+        registered.update(family_cols)
+
+    stim_cols = sorted(
+        [
+            col
+            for col in available_cols
+            if col.startswith("stim_") and col.removeprefix("stim_").isdigit()
+        ],
+        key=lambda col: _numeric_suffix(col, "stim_"),
+    )
+    bias_hot_cols = sorted(
+        [
+            col
+            for col in available_cols
+            if col.startswith("bias_") and col.removeprefix("bias_").isdigit()
+        ],
+        key=lambda col: _numeric_suffix(col, "bias_"),
+    )
+    choice_lag_cols = sorted(
+        [
+            col
+            for col in available_cols
+            if col.startswith("choice_lag_") and col.removeprefix("choice_lag_").isdigit()
+        ],
+        key=lambda col: _numeric_suffix(col, "choice_lag_"),
+    )
+
+    for group in _2AFC_EMISSION_GROUPS:
+        key = group["key"]
+        if key == "bias":
+            add_scalar(group)
+            add_hidden_family(
+                key="bias_hot",
+                label="bias hot",
+                family_cols=bias_hot_cols,
+            )
+            continue
+        if key == "stim_param":
+            add_scalar(group)
+            add_hidden_family(
+                key="stim_hot",
+                label="stim hot",
+                family_cols=stim_cols,
+                toggle_cols=[col for col in stim_cols if col != "stim_0"],
+            )
+            continue
+        if key == "at_choice":
+            add_scalar(group)
+            add_hidden_family(
+                key="at_choice_lag",
+                label="choice lag",
+                family_cols=choice_lag_cols,
+            )
+            continue
+        add_scalar(group)
+
     for col in available_cols:
         if col not in registered:
             result.append({"key": col, "label": col, "members": {"N": col}})
@@ -604,6 +710,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     def _refresh_groups(self) -> None:
         """Rebuild emission_groups / transition_groups from current *_options traits."""
+        if self.task.upper() == "2AFC":
+            self.emission_groups = _build_2afc_emission_groups(self.emission_cols_options)
+            self.transition_groups = []
+            return
         if self.task.upper() in _BINARY_TASK_KEYS:
             e_reg = _2AFC_EMISSION_GROUPS
             t_reg: list[dict] = []

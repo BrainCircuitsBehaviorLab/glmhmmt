@@ -300,15 +300,21 @@ function renderRegressorTable(groups, selectedCols, dataAttr) {
   let rows = "";
   for (const group of groups) {
     const members   = group.members;           // { L?, C?, N?, R? } → col name
-    const allCols   = Object.values(members);
+    const allCols   = Array.isArray(group.toggle_members) && group.toggle_members.length > 0
+      ? group.toggle_members
+      : Object.values(members);
     const allSel    = allCols.every(c => sel.has(c));
     const someSel   = allCols.some(c =>  sel.has(c));
     const rowClass  = allSel ? "selected" : someSel ? "partial" : "";
+    const hideMembers = Boolean(group.hide_members);
 
     // Encode member list in the label cell so the click handler can toggle all
     const membersJSON = JSON.stringify(allCols).replace(/'/g, "&#39;");
 
     const cellFor = (side) => {
+      if (hideMembers) {
+        return `<td class="mm-reg-cell mm-reg-empty"></td>`;
+      }
       const col = members[side];
       if (!col) return `<td class="mm-reg-cell mm-reg-empty"></td>`;
       const active = sel.has(col) ? "selected" : "";

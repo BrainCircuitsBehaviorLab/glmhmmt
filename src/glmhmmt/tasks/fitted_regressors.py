@@ -20,6 +20,7 @@ class FittedWeightRegressorSpec:
     fit_model_id: str
     arrays_suffix: str
     source_features: tuple[str, ...] = ()
+    source_feature_prefixes: tuple[str, ...] = ()
     exclude_features: tuple[str, ...] = ()
     excluded_subjects: tuple[str, ...] = ()
     sign: float = 1.0
@@ -74,11 +75,29 @@ def _resolved_source_features_cached(
 
     emission_cols = tuple(str(col) for col in config.get("emission_cols", []))
     exclude = set(spec.exclude_features)
-    resolved = tuple(col for col in emission_cols if col not in exclude)
+    if spec.source_feature_prefixes:
+        prefixes = tuple(spec.source_feature_prefixes)
+        resolved = tuple(
+            col
+            for col in emission_cols
+            if any(col.startswith(prefix) for prefix in prefixes)
+            and col not in exclude
+        )
+    else:
+        resolved = tuple(col for col in emission_cols if col not in exclude)
     if not resolved:
+        if spec.source_feature_prefixes:
+            source_desc = (
+                f"matching prefixes {list(spec.source_feature_prefixes)} from "
+                f"{list(emission_cols)}"
+            )
+        else:
+            source_desc = (
+                f"excluding {sorted(exclude)} from {list(emission_cols)}"
+            )
         raise ValueError(
             f"No fitted source features remained for {spec.target_name!r} after "
-            f"excluding {sorted(exclude)} from {list(emission_cols)}."
+            f"{source_desc}."
         )
     return resolved
 

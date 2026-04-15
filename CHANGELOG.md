@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- Updated the 2AFC model-manager widget so one-hot regressor families can be selected as a single row-level toggle without exposing individual member cells in the table.
+- Added grouped widget support for `stim_hot`, `bias_hot`, and `at_choice_lag` so large one-hot feature families no longer clutter the regressor selector UI.
+- Extended fitted-regressor source selection to support prefix-based feature-family resolution, which lets mixed source fits feed multiple cumulative regressors cleanly.
+
 ## 0.1.8
 
 - Fixed the shared `history` lapse-mode optimizer constraints so binary GLMs no longer index past the two shared repeat/alternate lapse parameters.
