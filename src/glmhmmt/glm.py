@@ -182,10 +182,8 @@ def _history_alternate_targets(
     if num_classes == 2:
         targets[1:, 1 - prev] = 1.0
         return targets
-    for t in range(1, T):
-        prev_class = int(y_np[t - 1])
-        other_classes = [cls for cls in range(num_classes) if cls != prev_class]
-        targets[t, other_classes] = 1.0 / float(len(other_classes))
+    targets[1:] = 1.0 / float(num_classes - 1)
+    targets[np.arange(1, T), prev] = 0.0
     return targets
 
 
@@ -195,6 +193,10 @@ def _apply_lapse_mode(
     num_classes: int,
     lapse_mode: str,
     lapse_rates: np.ndarray,
+    *,
+    repeat_targets: np.ndarray | None = None,
+    alternate_targets: np.ndarray | None = None,
+    prev_choices: np.ndarray | None = None,
 ) -> np.ndarray:
     probs = np.asarray(base_probs, dtype=float)
     if lapse_mode == "none":
@@ -205,8 +207,12 @@ def _apply_lapse_mode(
         total_mass = float(lapse_rates.sum())
         return lapse_rates[None, :] + (1.0 - total_mass) * probs
 
-    repeat_targets = _history_repeat_targets(y_np, num_classes)
-    alternate_targets = _history_alternate_targets(y_np, num_classes)
+    if repeat_targets is None:
+        repeat_targets = _history_repeat_targets(y_np, num_classes)
+    if alternate_targets is None:
+        alternate_targets = _history_alternate_targets(y_np, num_classes)
+    if prev_choices is None:
+        prev_choices = y_np[:-1]
     if probs.shape[0] > 0:
         trial_mass = np.zeros(probs.shape[0], dtype=float)
         if lapse_mode == "history":
@@ -221,11 +227,10 @@ def _apply_lapse_mode(
             repeat_rates = lapse_rates[:num_classes]
             alternate_rates = lapse_rates[num_classes:]
             if probs.shape[0] > 1:
-                prev = y_np[:-1]
-                trial_mass[1:] = repeat_rates[prev] + alternate_rates[prev]
+                trial_mass[1:] = repeat_rates[prev_choices] + alternate_rates[prev_choices]
             adjusted = probs * (1.0 - trial_mass[:, None])
-            adjusted += repeat_targets * np.concatenate([[0.0], repeat_rates[y_np[:-1]]])[:, None]
-            adjusted += alternate_targets * np.concatenate([[0.0], alternate_rates[y_np[:-1]]])[:, None]
+            adjusted += repeat_targets * np.concatenate([[0.0], repeat_rates[prev_choices]])[:, None]
+            adjusted += alternate_targets * np.concatenate([[0.0], alternate_rates[prev_choices]])[:, None]
         adjusted[0] = probs[0]
         return adjusted
     return probs
@@ -264,6 +269,13 @@ def fit_glm(
     fit_lapse = lapse_mode != "none"
     lapse_size = _num_lapse_params(num_classes, lapse_mode)
     lapse_labels = _lapse_labels(num_classes, lapse_mode)
+    repeat_targets = None
+    alternate_targets = None
+    prev_choices = None
+    if lapse_mode in {"history", "history_conditioned"}:
+        repeat_targets = _history_repeat_targets(y_np, num_classes)
+        alternate_targets = _history_alternate_targets(y_np, num_classes)
+        prev_choices = y_np[:-1]
 
     def neg_log_likelihood(w_flat: np.ndarray) -> float:
         if fit_lapse:
@@ -276,7 +288,16 @@ def fit_glm(
             w_flat_w = w_flat
             lapse_rates_local = np.zeros(lapse_size, dtype=float)
         base_probs = _base_predictive_probs(X_np, w_flat_w, num_classes)
-        probs = _apply_lapse_mode(base_probs, y_np, num_classes, lapse_mode, lapse_rates_local)
+        probs = _apply_lapse_mode(
+            base_probs,
+            y_np,
+            num_classes,
+            lapse_mode,
+            lapse_rates_local,
+            repeat_targets=repeat_targets,
+            alternate_targets=alternate_targets,
+            prev_choices=prev_choices,
+        )
         probs = np.clip(probs, 1e-10, 1.0)
         probs /= probs.sum(axis=1, keepdims=True)
         return -float(np.sum(np.log(probs[np.arange(T), y_np])))
@@ -453,7 +474,16 @@ def fit_glm(
         weights = np.concatenate([W_pair, np.zeros((1, M))], axis=0)
 
     base_probs = _base_predictive_probs(X_np, w_flat_w, num_classes)
-    predictive_probs = _apply_lapse_mode(base_probs, y_np, num_classes, lapse_mode, lapse_rates)
+    predictive_probs = _apply_lapse_mode(
+        base_probs,
+        y_np,
+        num_classes,
+        lapse_mode,
+        lapse_rates,
+        repeat_targets=repeat_targets,
+        alternate_targets=alternate_targets,
+        prev_choices=prev_choices,
+    )
     if T > 0:
         predictive_probs = np.clip(predictive_probs, 1e-10, 1.0)
         predictive_probs /= predictive_probs.sum(axis=1, keepdims=True)

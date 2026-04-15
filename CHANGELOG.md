@@ -1,8 +1,10 @@
 # Changelog
 
+## 0.1.12
+- Optimized the glm function for lapses mode.
+
 ## 0.1.11
 - Fixed progress bar callback in fit_glm.py.
-
 
 ## 0.1.10
 
