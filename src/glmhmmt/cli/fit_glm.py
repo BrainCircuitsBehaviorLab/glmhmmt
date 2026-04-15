@@ -4,6 +4,7 @@ import argparse
 import json
 import hashlib
 from pathlib import Path
+from typing import Any, Callable
 
 from glmhmmt.glm import fit_glm
 from glmhmmt.runtime import (
@@ -12,6 +13,8 @@ from glmhmmt.runtime import (
     get_results_dir,
 )
 from glmhmmt.tasks import get_adapter
+
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 def fit_subject(
@@ -25,6 +28,7 @@ def fit_subject(
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
     seed: int = 0,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict:
     """Fit a GLM (K=1) to a single subject."""
 
@@ -48,6 +52,7 @@ def fit_subject(
         n_restarts=n_restarts,
         restart_noise_scale=restart_noise_scale,
         seed=seed,
+        progress_callback=progress_callback,
     )
 
     return {
@@ -166,6 +171,8 @@ def main(
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
     seed: int = 0,
+    verbose: bool = True,
+    progress_callback: ProgressCallback | None = None,
 ):
     # Compute base output directory
     base_out_dir = get_results_dir() / "fits" / task / "glm"
@@ -214,7 +221,11 @@ def main(
                  "model_id": d.name
              }, f, indent=4)
         
-    print(f"Fitting GLM | Task={task} Tau={tau} Hash={model_hash} Alias={model_alias} N={len(subjects) if subjects else 'All'}")
+    if verbose:
+        print(
+            f"Fitting GLM | Task={task} Tau={tau} Hash={model_hash} "
+            f"Alias={model_alias} N={len(subjects) if subjects else 'All'}"
+        )
 
     adapter = get_adapter(task)
     num_classes = adapter.num_classes
@@ -224,11 +235,35 @@ def main(
         df = adapter.subject_filter(df)
         subjects = df["subject"].unique().sort().to_list()
 
-    print(f"Fitting GLM | Task={task} Tau={tau} N={len(subjects)}")
+    if verbose:
+        print(f"Fitting GLM | Task={task} Tau={tau} N={len(subjects)}")
     
-    for subj in subjects:
-        print(f"  Fitting {subj}...")
+    for subj_idx, subj in enumerate(subjects, start=1):
+        if verbose:
+            print(f"  Fitting {subj}...")
+
+        def _progress(info: dict[str, Any]) -> None:
+            if progress_callback is None:
+                return
+            progress_callback(
+                {
+                    **info,
+                    "subject": subj,
+                    "subject_index": subj_idx,
+                    "subject_total": len(subjects),
+                }
+            )
+
         try:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "subject_start",
+                        "subject": subj,
+                        "subject_index": subj_idx,
+                        "subject_total": len(subjects),
+                    }
+                )
             res = fit_subject(
                 subj,
                 tau=tau,
@@ -240,15 +275,38 @@ def main(
                 n_restarts=n_restarts,
                 restart_noise_scale=restart_noise_scale,
                 seed=seed,
+                progress_callback=_progress if progress_callback is not None else None,
             )
             for d in out_dirs:
                 save_results(res, d, tau)
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "subject_complete",
+                        "subject": subj,
+                        "subject_index": subj_idx,
+                        "subject_total": len(subjects),
+                    }
+                )
         except Exception as e:
-            print(f"  Failed {subj}: {e}")
+            if verbose:
+                print(f"  Failed {subj}: {e}")
             import traceback
-            traceback.print_exc()
+            if verbose:
+                traceback.print_exc()
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "subject_error",
+                        "subject": subj,
+                        "subject_index": subj_idx,
+                        "subject_total": len(subjects),
+                        "error": str(e),
+                    }
+                )
     
-    print("Done.")
+    if verbose:
+        print("Done.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

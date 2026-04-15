@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -9,6 +10,7 @@ from scipy.special import expit, softmax
 
 
 LAPSE_MODES = {"none", "class", "history", "history_conditioned"}
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -242,6 +244,7 @@ def fit_glm(
     seed: int | None = 0,
     maxiter: int = 2000,
     ftol: float = 1e-9,
+    progress_callback: ProgressCallback | None = None,
 ) -> GLMFitResult:
     """Fit a single-state GLM model directly from arrays."""
 
@@ -325,6 +328,7 @@ def fit_glm(
                 seed=seed,
                 maxiter=maxiter,
                 ftol=ftol,
+                progress_callback=None,
             )
             if weight_dim > 0:
                 base_x0[:weight_dim] = warm_start.weights[:-1].reshape(-1)
@@ -338,7 +342,15 @@ def fit_glm(
             best_res = None
             best_fun = float("inf")
 
-            for _ in range(int(n_restarts)):
+            for restart_idx in range(int(n_restarts)):
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "restart_start",
+                            "restart_index": restart_idx + 1,
+                            "restart_total": int(n_restarts),
+                        }
+                    )
                 x0 = base_x0.copy()
                 if restart_noise_scale > 0.0:
                     x0 += rng.normal(0.0, restart_noise_scale, size=n_params)
@@ -363,6 +375,16 @@ def fit_glm(
                 candidate_fun = float(neg_log_likelihood(candidate_x))
                 candidate_success = bool(candidate_res.success)
                 best_success = False if best_res is None else bool(best_res.success)
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "restart_complete",
+                            "restart_index": restart_idx + 1,
+                            "restart_total": int(n_restarts),
+                            "negative_log_likelihood": candidate_fun,
+                            "success": candidate_success,
+                        }
+                    )
 
                 if (
                     best_res is None
@@ -378,6 +400,14 @@ def fit_glm(
 
             res = best_res
         else:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "restart_start",
+                        "restart_index": 1,
+                        "restart_total": 1,
+                    }
+                )
             res = minimize(
                 neg_log_likelihood,
                 x0,
@@ -385,6 +415,16 @@ def fit_glm(
                 bounds=bounds,
                 **minimize_kwargs,
             )
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "restart_complete",
+                        "restart_index": 1,
+                        "restart_total": 1,
+                        "negative_log_likelihood": float(res.fun),
+                        "success": bool(res.success),
+                    }
+                )
         success = bool(res.success)
         w_flat = np.asarray(res.x, dtype=float)
         nll = float(res.fun)

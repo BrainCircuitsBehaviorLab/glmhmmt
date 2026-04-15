@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10
+
+- Standardized the 2AFC one-hot regressor family labels to `stim_hot`, `bias_hot`, and `choice_lag` in the model-manager widget.
+- Collapsed fully selected one-hot regressor families back to their grouped names in the saved-model table, so the regressor summary matches the selector UI instead of listing raw `stim_*`, `bias_*`, or `choice_lag_*` members.
+
 ## 0.1.9
 
 - Updated the 2AFC model-manager widget so one-hot regressor families can be selected as a single row-level toggle without exposing individual member cells in the table.

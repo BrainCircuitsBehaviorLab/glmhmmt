@@ -195,7 +195,7 @@ def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
             add_scalar(group)
             add_hidden_family(
                 key="bias_hot",
-                label="bias hot",
+                label="bias_hot",
                 family_cols=bias_hot_cols,
             )
             continue
@@ -203,7 +203,7 @@ def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
             add_scalar(group)
             add_hidden_family(
                 key="stim_hot",
-                label="stim hot",
+                label="stim_hot",
                 family_cols=stim_cols,
                 toggle_cols=[col for col in stim_cols if col != "stim_0"],
             )
@@ -212,7 +212,7 @@ def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
             add_scalar(group)
             add_hidden_family(
                 key="at_choice_lag",
-                label="choice lag",
+                label="choice_lag",
                 family_cols=choice_lag_cols,
             )
             continue
@@ -259,6 +259,35 @@ def _get_display_name(cfg: dict) -> str:
     if alias and alias.strip():
         return alias.strip()
     return cfg.get("model_id", "")
+
+
+def _summarize_selected_regressors(selected_cols: list[str], groups: list[dict]) -> list[str]:
+    """Collapse fully-selected hidden families into a single group key."""
+    selected_set = set(selected_cols)
+    consumed: set[str] = set()
+    summary: list[str] = []
+
+    for group in groups:
+        members = list(group.get("toggle_members") or group.get("members", {}).values())
+        if not members:
+            continue
+        if all(member in selected_set for member in members):
+            summary.append(str(group.get("key", group.get("label", ""))))
+            consumed.update(members)
+
+    for col in selected_cols:
+        if col not in consumed:
+            summary.append(col)
+
+    return summary
+
+
+def _format_emission_regressor_summary(task: str, emission_cols: list[str]) -> str:
+    if task in _BINARY_TASK_KEYS:
+        groups = _build_2afc_emission_groups(emission_cols)
+    else:
+        groups = _build_regressor_groups(emission_cols, _MCDR_EMISSION_GROUPS)
+    return ", ".join(_summarize_selected_regressors(emission_cols, groups))
 
 
 def _get_K_from_config(cfg: dict) -> Any:
@@ -793,7 +822,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "K":        _get_K_from_config(cfg),
                 "tau":      cfg.get("tau", ""),
                 "cv":       cv_label,
-                "regressors": ", ".join(cfg.get("emission_cols", [])),
+                "regressors": _format_emission_regressor_summary(
+                    self.task,
+                    list(cfg.get("emission_cols", [])),
+                ),
                 "transition_regressors": ", ".join(cfg.get("transition_cols", [])),
             })
             names.append(display_name)
@@ -853,7 +885,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "K":          2,
                 "tau":        50,
                 "cv":         "none",
-                "regressors": ", ".join(default_ecols),
+                "regressors": _format_emission_regressor_summary(
+                    self.task,
+                    list(default_ecols),
+                ),
                 "transition_regressors": ", ".join(tcols),
             }
         except Exception as e:
