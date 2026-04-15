@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11
+- Fixed progress bar callback in fit_glm.py.
+
+
 ## 0.1.10
 
 - Standardized the 2AFC one-hot regressor family labels to `stim_hot`, `bias_hot`, and `choice_lag` in the model-manager widget.

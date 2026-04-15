@@ -255,15 +255,6 @@ def main(
             )
 
         try:
-            if progress_callback is not None:
-                progress_callback(
-                    {
-                        "event": "subject_start",
-                        "subject": subj,
-                        "subject_index": subj_idx,
-                        "subject_total": len(subjects),
-                    }
-                )
             res = fit_subject(
                 subj,
                 tau=tau,
@@ -279,31 +270,12 @@ def main(
             )
             for d in out_dirs:
                 save_results(res, d, tau)
-            if progress_callback is not None:
-                progress_callback(
-                    {
-                        "event": "subject_complete",
-                        "subject": subj,
-                        "subject_index": subj_idx,
-                        "subject_total": len(subjects),
-                    }
-                )
         except Exception as e:
             if verbose:
                 print(f"  Failed {subj}: {e}")
             import traceback
             if verbose:
                 traceback.print_exc()
-            if progress_callback is not None:
-                progress_callback(
-                    {
-                        "event": "subject_error",
-                        "subject": subj,
-                        "subject_index": subj_idx,
-                        "subject_total": len(subjects),
-                        "error": str(e),
-                    }
-                )
     
     if verbose:
         print("Done.")
