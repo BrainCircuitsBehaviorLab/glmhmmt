@@ -44,6 +44,7 @@ def _write_fit(
     model_id: str,
     emission_cols: list[str],
     weights: list[float],
+    subject: str = "mouse-1",
 ) -> None:
     fit_dir = results_root / "fits" / task / "glm" / model_id
     fit_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,7 @@ def _write_fit(
         encoding="utf-8",
     )
     np.savez(
-        fit_dir / "mouse-1_glm_arrays.npz",
+        fit_dir / f"{subject}_glm_arrays.npz",
         X_cols=np.asarray(emission_cols, dtype=object),
         emission_weights=np.asarray([[[*weights]]], dtype=float),
     )
@@ -179,4 +180,88 @@ def test_weighted_sum_regressor_uses_only_its_selected_family(isolated_runtime):
     np.testing.assert_allclose(
         weighted_sum_regressor(part, choice_spec),
         np.asarray([1.25, -1.5], dtype=np.float32),
+    )
+
+
+def test_weighted_sum_regressor_prefers_subject_specific_fit_weights(isolated_runtime):
+    emission_cols = ["stim_2", "stim_4", "bias_0", "choice_lag_01"]
+    _write_fit(
+        isolated_runtime,
+        task="2AFC",
+        model_id="one hot sessions lags",
+        emission_cols=emission_cols,
+        weights=[2.0, 4.0, 0.5, 1.0],
+        subject="mouse-1",
+    )
+    _write_fit(
+        isolated_runtime,
+        task="2AFC",
+        model_id="one hot sessions lags",
+        emission_cols=emission_cols,
+        weights=[10.0, 20.0, 5.0, 7.0],
+        subject="mouse-2",
+    )
+
+    stim_spec = FittedWeightRegressorSpec(
+        target_name="stim_param",
+        fit_task="2AFC",
+        fit_model_kind="glm",
+        fit_model_id="one hot sessions lags",
+        arrays_suffix="glm_arrays.npz",
+        source_feature_prefixes=("stim_",),
+    )
+
+    part = pd.DataFrame(
+        {
+            "subject": ["mouse-2", "mouse-2"],
+            "stim_2": [1.0, 0.0],
+            "stim_4": [0.0, -1.0],
+        }
+    )
+
+    np.testing.assert_allclose(
+        weighted_sum_regressor(part, stim_spec),
+        np.asarray([10.0, -20.0], dtype=np.float32),
+    )
+
+
+def test_weighted_sum_regressor_falls_back_to_pooled_weights_when_subject_fit_missing(isolated_runtime):
+    emission_cols = ["stim_2", "stim_4"]
+    _write_fit(
+        isolated_runtime,
+        task="2AFC",
+        model_id="one hot sessions lags",
+        emission_cols=emission_cols,
+        weights=[2.0, 4.0],
+        subject="mouse-1",
+    )
+    _write_fit(
+        isolated_runtime,
+        task="2AFC",
+        model_id="one hot sessions lags",
+        emission_cols=emission_cols,
+        weights=[6.0, 8.0],
+        subject="mouse-2",
+    )
+
+    stim_spec = FittedWeightRegressorSpec(
+        target_name="stim_param",
+        fit_task="2AFC",
+        fit_model_kind="glm",
+        fit_model_id="one hot sessions lags",
+        arrays_suffix="glm_arrays.npz",
+        source_feature_prefixes=("stim_",),
+    )
+
+    part = pd.DataFrame(
+        {
+            "subject": ["mouse-3", "mouse-3"],
+            "stim_2": [1.0, 0.0],
+            "stim_4": [0.0, -1.0],
+        }
+    )
+
+    np.testing.assert_allclose(
+        weighted_sum_regressor(part, stim_spec),
+        np.asarray([4.0, -6.0], dtype=np.float32),
     )

@@ -1435,10 +1435,95 @@ def _prepare_binary_emission_summary_arrays(
     return stacked, feature_names, resolved_hue_order, state_colors
 
 
+def _binary_emission_plot_df(
+    views=None,
+    *,
+    weights_df=None,
+    K: int | None = None,
+    weight_sign: float,
+    state_label_order: Sequence[str] | None,
+    feature_order: Sequence[str] | None,
+    abs_features: Sequence[str],
+    feature_labeler: Callable[[str], str] | None,
+) -> tuple[pd.DataFrame, list[str], list[str], dict[str, str]]:
+    if weights_df is None:
+        if views is None:
+            return pd.DataFrame(), [], [], {}
+        from glmhmmt.postprocess import build_emission_weights_df
+
+        weights_df = build_emission_weights_df(views)
+
+    df = weights_df.to_pandas() if isinstance(weights_df, pl.DataFrame) else pd.DataFrame(weights_df).copy()
+    if df.empty:
+        return df, [], [], {}
+
+    if "class_idx" in df.columns:
+        df = df[df["class_idx"] == 0].copy()
+    if df.empty:
+        return df, [], [], {}
+
+    df["feature"] = df["feature"].astype(str)
+    df["weight"] = pd.to_numeric(df["weight"], errors="coerce") * float(weight_sign)
+    if "subject" not in df.columns:
+        df["subject"] = "subject-0"
+    else:
+        df["subject"] = df["subject"].astype(str)
+    if "state_label" not in df.columns:
+        df["state_label"] = "State 0"
+    else:
+        df["state_label"] = df["state_label"].astype(str)
+    if "state_rank" not in df.columns:
+        df["state_rank"] = [get_state_rank(label, fallback_idx=0) for label in df["state_label"]]
+    df = df.dropna(subset=["weight"]).copy()
+    if df.empty:
+        return df, [], [], {}
+
+    abs_feature_set = set(abs_features)
+    if abs_feature_set:
+        abs_mask = df["feature"].isin(abs_feature_set)
+        df.loc[abs_mask, "weight"] = df.loc[abs_mask, "weight"].abs()
+
+    feature_names = list(pd.unique(df["feature"]))
+    desired = [name for name in (feature_order or ()) if name in feature_names]
+    ordered_features = desired + [name for name in feature_names if name not in desired]
+    df["feature"] = pd.Categorical(df["feature"], categories=ordered_features, ordered=True)
+    df = df[df["feature"].notna()].copy()
+    if df.empty:
+        return df, [], [], {}
+
+    state_meta = (
+        df[["state_rank", "state_label"]]
+        .drop_duplicates()
+        .sort_values(["state_rank", "state_label"])
+        .reset_index(drop=True)
+    )
+    base_state_order = state_meta["state_label"].tolist()
+    state_order = [base_state_order[idx] for idx in _apply_label_priority(base_state_order, state_label_order)]
+    palette = {
+        label: get_state_color(label, idx, K=K or len(state_order) or None)
+        for idx, label in enumerate(state_order)
+    }
+
+    display_features = [feature_labeler(name) if feature_labeler else name for name in ordered_features]
+    label_map = dict(zip(ordered_features, display_features, strict=False))
+    df["Feature"] = pd.Categorical(
+        df["feature"].map(label_map),
+        categories=display_features,
+        ordered=True,
+    )
+    df["State"] = pd.Categorical(
+        df["state_label"],
+        categories=state_order,
+        ordered=True,
+    )
+    return df, display_features, state_order, palette
+
+
 def plot_binary_emission_weights_by_subject(
     views: dict,
     K: int,
     *,
+    weights_df=None,
     weight_sign: float = 1.0,
     state_label_order: Sequence[str] | None = None,
     feature_order: Sequence[str] | None = None,
@@ -1446,42 +1531,50 @@ def plot_binary_emission_weights_by_subject(
     feature_labeler: Callable[[str], str] | None = None,
     save_path=None,
 ) -> plt.Figure:
-    valid_subjs = list(views.keys())
+    df, display_features, state_order, palette = _binary_emission_plot_df(
+        views,
+        weights_df=weights_df,
+        K=K,
+        weight_sign=weight_sign,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+    )
+    valid_subjs = sorted(pd.unique(df["subject"]).tolist()) if not df.empty else []
     if not valid_subjs:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
 
-    exemplar = next(iter(views.values()))
-    feature_names = list(exemplar.feat_names or [])
     n_cols = min(3, len(valid_subjs))
     n_rows = int(math.ceil(len(valid_subjs) / n_cols))
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(max(5, 0.7 * max(1, len(feature_names))) * n_cols, 3.5 * n_rows),
+        figsize=(max(5, 0.7 * max(1, len(display_features))) * n_cols, 3.5 * n_rows),
         sharey=True,
         squeeze=False,
     )
 
     for idx, subj in enumerate(valid_subjs):
         ax = axes[idx // n_cols, idx % n_cols]
-        weights, state_labels, ordered_feature_names = _prepare_binary_emission_subject(
-            views[subj],
-            weight_sign=weight_sign,
-            state_label_order=state_label_order,
-            feature_order=feature_order,
-            abs_features=abs_features,
+        sns.barplot(
+            data=df[df["subject"] == subj],
+            x="Feature",
+            y="weight",
+            hue="State",
+            hue_order=state_order,
+            palette=palette,
+            errorbar=None,
+            dodge=True,
+            ax=ax,
         )
-        _draw_binary_emission_weights_by_subject(
-            ax,
-            weights=weights,
-            feature_names=ordered_feature_names,
-            state_labels=state_labels,
-            feature_labeler=feature_labeler,
-            K=K,
-            title=f"Subject {subj}",
-        )
+        ax.axhline(0, color="k", lw=0.8, ls="--")
+        plt.setp(ax.get_xticklabels(), rotation=35, ha="right")
+        ax.set_ylabel("Weight")
+        ax.set_xlabel("")
+        ax.set_title(f"Subject {subj}")
 
     for idx in range(len(valid_subjs), n_rows * n_cols):
         axes[idx // n_cols, idx % n_cols].set_visible(False)
@@ -1502,49 +1595,35 @@ def plot_binary_emission_weights_summary_lineplot(
     views: dict,
     K: int,
     *,
+    weights_df=None,
     weight_sign: float = 1.0,
     state_label_order: Sequence[str] | None = None,
     feature_order: Sequence[str] | None = None,
     abs_features: Sequence[str] = (),
     feature_labeler: Callable[[str], str] | None = None,
 ) -> plt.Figure:
-    stacked, feature_names, hue_order, state_colors = _prepare_binary_emission_summary_arrays(
+    df, display_features, state_order, palette = _binary_emission_plot_df(
         views,
+        weights_df=weights_df,
         K=K,
         weight_sign=weight_sign,
         state_label_order=state_label_order,
         feature_order=feature_order,
         abs_features=abs_features,
+        feature_labeler=feature_labeler,
     )
-    if stacked is None:
+    if df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
-
-    averaged = stacked.mean(axis=2)
-    display_features = [feature_labeler(name) if feature_labeler else name for name in feature_names]
-    records = []
-    for subj_idx in range(averaged.shape[0]):
-        for state_idx, state_name in enumerate(hue_order):
-            for feature_idx, feature_name in enumerate(display_features):
-                records.append(
-                    {
-                        "Subject": subj_idx,
-                        "State": state_name,
-                        "Feature": feature_name,
-                        "Weight": averaged[subj_idx, state_idx, feature_idx],
-                    }
-                )
-    df = pd.DataFrame(records)
-    palette = {label: color for label, color in zip(hue_order, state_colors, strict=False)}
 
     fig, ax = plt.subplots(figsize=(max(6.0, 1.6 * max(1, len(display_features))), 4.2))
     sns.lineplot(
         data=df,
         x="Feature",
-        y="Weight",
+        y="weight",
         hue="State",
-        hue_order=hue_order,
+        hue_order=state_order,
         palette=palette,
         ax=ax,
         markers=True,
@@ -1571,124 +1650,59 @@ def plot_binary_emission_weights_summary_boxplot(
     views: dict,
     K: int,
     *,
+    weights_df=None,
     weight_sign: float = 1.0,
     state_label_order: Sequence[str] | None = None,
     feature_order: Sequence[str] | None = None,
     abs_features: Sequence[str] = (),
     feature_labeler: Callable[[str], str] | None = None,
 ) -> plt.Figure:
-    from scipy.stats import ttest_rel
-    import itertools
-
-    stacked, feature_names, hue_order, state_colors = _prepare_binary_emission_summary_arrays(
+    df, display_features, state_order, palette = _binary_emission_plot_df(
         views,
+        weights_df=weights_df,
         K=K,
         weight_sign=weight_sign,
         state_label_order=state_label_order,
         feature_order=feature_order,
         abs_features=abs_features,
+        feature_labeler=feature_labeler,
     )
-    if stacked is None:
+    if df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
 
-    averaged = stacked.mean(axis=2)
-    n_subjects, n_states, _, n_features = stacked.shape
-    display_features = [feature_labeler(name) if feature_labeler else name for name in feature_names]
     fig, ax = plt.subplots(figsize=(max(6.0, 1.6 * max(1, len(display_features))), 4.2))
-
-    hue_width = 0.8 / max(1, n_states)
-    positions = []
-    grouped_weights = []
-    for feature_idx in range(n_features):
-        for state_idx in range(n_states):
-            positions.append(feature_idx + (state_idx - (n_states - 1) / 2) * hue_width)
-            grouped_weights.append(averaged[:, state_idx, feature_idx])
-
-    box = ax.boxplot(
-        grouped_weights,
-        positions=positions,
-        widths=hue_width * 0.9,
-        patch_artist=True,
+    sns.boxplot(
+        data=df,
+        x="Feature",
+        y="weight",
+        hue="State",
+        hue_order=state_order,
+        palette=palette,
         showfliers=False,
-        showcaps=False,
-        zorder=0,
+        ax=ax,
     )
-    for patch in box["boxes"]:
-        patch.set(facecolor="white", edgecolor="#666666", linewidth=1.1)
-    for elem in ("whiskers", "caps"):
-        for artist in box[elem]:
-            artist.set(color="#666666", linewidth=1.0)
-    for idx, median in enumerate(box["medians"]):
-        median.set(color=state_colors[idx % n_states], linewidth=3)
-
-    for feature_idx in range(n_features):
-        for subj_idx in range(n_subjects):
-            xs = []
-            ys = []
-            for state_idx in range(n_states):
-                xs.append(feature_idx + (state_idx - (n_states - 1) / 2) * hue_width)
-                ys.append(averaged[subj_idx, state_idx, feature_idx])
-            ax.plot(xs, ys, color="#7A7A7A", alpha=0.125, lw=1.5, zorder=5)
-
+    sns.stripplot(
+        data=df,
+        x="Feature",
+        y="weight",
+        hue="State",
+        hue_order=state_order,
+        palette=palette,
+        dodge=True,
+        alpha=0.35,
+        legend=False,
+        ax=ax,
+    )
     ax.axhline(0, color="k", lw=0.8, ls="--")
-
-    def _star(pval: float) -> str:
-        if pval < 0.001:
-            return "***"
-        if pval < 0.01:
-            return "**"
-        if pval < 0.05:
-            return "*"
-        return "ns"
-
-    y_range = averaged.max() - averaged.min()
-    if y_range == 0:
-        y_range = 1
-
-    state_pairs = list(itertools.combinations(range(n_states), 2))
-    for feature_idx in range(n_features):
-        y_max = averaged[:, :, feature_idx].max()
-        y_offset_step = y_range * 0.05
-        current_y_offset = y_max + y_offset_step
-        for p1, p2 in state_pairs:
-            try:
-                _, pval = ttest_rel(averaged[:, p1, feature_idx], averaged[:, p2, feature_idx])
-                star = _star(pval)
-            except Exception:
-                star = ""
-            if not star:
-                continue
-
-            offset_1 = (p1 - (n_states - 1) / 2) * hue_width
-            offset_2 = (p2 - (n_states - 1) / 2) * hue_width
-            x1 = feature_idx + offset_1
-            x2 = feature_idx + offset_2
-            ax.plot([x1, x1, x2, x2], [current_y_offset, current_y_offset, current_y_offset, current_y_offset], lw=1, c="k")
-            ax.text((x1 + x2) / 2, current_y_offset, star, ha="center", va="bottom", color="k")
-            current_y_offset += y_offset_step * 1.5
-
-    ax.set_xticks(range(n_features))
-    ax.set_xticklabels(display_features, rotation=0, ha="center")
+    plt.setp(ax.get_xticklabels(), rotation=35, ha="right")
     ax.set_ylabel("Weight")
     ax.set_xlabel("")
     ax.set_title(f"Emission weights - box summary  (K={K})")
-
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            linestyle="",
-            markerfacecolor=state_colors[state_idx],
-            markeredgecolor="none",
-            markersize=7,
-            label=hue_order[state_idx],
-        )
-        for state_idx in range(n_states)
-    ]
-    ax.legend(legend_handles, hue_order[:n_states], frameon=False, bbox_to_anchor=(1.01, 1), loc="upper left")
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles[: len(state_order)], labels[: len(state_order)], frameon=False, bbox_to_anchor=(1.01, 1), loc="upper left")
     sns.despine(fig=fig)
     fig.tight_layout()
     return fig
@@ -1698,16 +1712,33 @@ def plot_binary_emission_weights_summary(
     views: dict,
     K: int,
     *,
+    weights_df=None,
     weight_sign: float = 1.0,
     state_label_order: Sequence[str] | None = None,
     feature_order: Sequence[str] | None = None,
     abs_features: Sequence[str] = (),
     feature_labeler: Callable[[str], str] | None = None,
 ) -> plt.Figure:
-    if len(views) > 1:
+    if weights_df is not None:
+        df, _, _, _ = _binary_emission_plot_df(
+            views,
+            weights_df=weights_df,
+            K=K,
+            weight_sign=weight_sign,
+            state_label_order=state_label_order,
+            feature_order=feature_order,
+            abs_features=abs_features,
+            feature_labeler=feature_labeler,
+        )
+        n_subjects = df["subject"].nunique() if not df.empty else 0
+    else:
+        n_subjects = len(views)
+
+    if n_subjects > 1:
         return plot_binary_emission_weights_summary_boxplot(
             views,
             K,
+            weights_df=weights_df,
             weight_sign=weight_sign,
             state_label_order=state_label_order,
             feature_order=feature_order,
@@ -1717,6 +1748,7 @@ def plot_binary_emission_weights_summary(
     return plot_binary_emission_weights_by_subject(
         views,
         K,
+        weights_df=weights_df,
         weight_sign=weight_sign,
         state_label_order=state_label_order,
         feature_order=feature_order,
@@ -1729,6 +1761,7 @@ def plot_binary_emission_weights(
     views: dict,
     K: int,
     *,
+    weights_df=None,
     weight_sign: float = 1.0,
     state_label_order: Sequence[str] | None = None,
     feature_order: Sequence[str] | None = None,
@@ -1740,6 +1773,7 @@ def plot_binary_emission_weights(
         plot_binary_emission_weights_by_subject(
             views,
             K,
+            weights_df=weights_df,
             weight_sign=weight_sign,
             state_label_order=state_label_order,
             feature_order=feature_order,
@@ -1750,6 +1784,7 @@ def plot_binary_emission_weights(
         plot_binary_emission_weights_summary(
             views,
             K,
+            weights_df=weights_df,
             weight_sign=weight_sign,
             state_label_order=state_label_order,
             feature_order=feature_order,

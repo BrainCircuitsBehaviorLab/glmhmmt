@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.13
+- Added by subject parametrization.
+
 ## 0.1.12
 - Optimized the glm function for lapses mode.
 

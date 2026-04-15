@@ -106,6 +106,75 @@ def mean_feature_weights_from_fit(spec: FittedWeightRegressorSpec) -> dict[str, 
     return _mean_feature_weights_from_fit_cached(spec, _fit_signature(spec))
 
 
+def subject_feature_weights_from_fit(
+    spec: FittedWeightRegressorSpec,
+    subject: str,
+) -> dict[str, float]:
+    return _subject_feature_weights_from_fit_cached(spec, str(subject), _fit_signature(spec))
+
+
+def _load_feature_weights_for_subject(
+    spec: FittedWeightRegressorSpec,
+    subject: str,
+    *,
+    signature: tuple[tuple[str, int, int], ...],
+) -> dict[str, float]:
+    _ = signature
+    features = resolved_source_features(spec)
+    excluded_subjects = set(spec.excluded_subjects)
+    if subject in excluded_subjects:
+        raise ValueError(
+            f"Subject {subject!r} is excluded for {spec.target_name!r}."
+        )
+
+    fit_dir = _fit_dir(spec)
+    arr_path = fit_dir / f"{subject}_{spec.arrays_suffix}"
+    if not arr_path.exists():
+        raise FileNotFoundError(
+            f"Missing fitted arrays for {spec.target_name!r} subject {subject!r}: {arr_path}"
+        )
+
+    with np.load(arr_path, allow_pickle=True) as arr:
+        x_cols = [str(col) for col in arr["X_cols"].tolist()]
+        emission_weights = np.asarray(arr["emission_weights"], dtype=float)
+
+    if emission_weights.ndim != 3:
+        raise ValueError(
+            f"Unexpected emission weight rank for {spec.target_name!r} subject {subject!r}."
+        )
+    if emission_weights.shape[0] <= spec.state_idx or emission_weights.shape[1] <= spec.class_idx:
+        raise ValueError(
+            f"Missing state/class slice for {spec.target_name!r} subject {subject!r}."
+        )
+
+    row = emission_weights[spec.state_idx, spec.class_idx, :]
+    col_to_weight = {
+        col: spec.sign * float(weight)
+        for col, weight in zip(x_cols, row)
+    }
+    missing = [feat for feat in features if feat not in col_to_weight]
+    if missing:
+        raise ValueError(
+            f"Missing fitted feature weights for {spec.target_name!r} subject {subject!r}: {missing}."
+        )
+    return {feat: col_to_weight[feat] for feat in features}
+
+
+@lru_cache(maxsize=None)
+def _subject_feature_weights_from_fit_cached(
+    spec: FittedWeightRegressorSpec,
+    subject: str,
+    _signature: tuple[tuple[str, int, int], ...],
+) -> dict[str, float]:
+    """Return fitted weights for one subject keyed by feature name."""
+    fit_dir = _fit_dir(spec)
+    if not fit_dir.exists():
+        raise FileNotFoundError(
+            f"Missing fit directory for {spec.target_name!r}: {fit_dir}"
+        )
+    return _load_feature_weights_for_subject(spec, subject, signature=_signature)
+
+
 @lru_cache(maxsize=None)
 def _mean_feature_weights_from_fit_cached(
     spec: FittedWeightRegressorSpec,
@@ -129,23 +198,12 @@ def _mean_feature_weights_from_fit_cached(
             continue
 
         try:
-            with np.load(arr_path, allow_pickle=True) as arr:
-                x_cols = [str(col) for col in arr["X_cols"].tolist()]
-                emission_weights = np.asarray(arr["emission_weights"], dtype=float)
+            col_to_weight = _load_feature_weights_for_subject(
+                spec,
+                subject,
+                signature=_signature,
+            )
         except Exception:
-            continue
-
-        if emission_weights.ndim != 3:
-            continue
-        if emission_weights.shape[0] <= spec.state_idx or emission_weights.shape[1] <= spec.class_idx:
-            continue
-
-        row = emission_weights[spec.state_idx, spec.class_idx, :]
-        col_to_weight = {
-            col: spec.sign * float(weight)
-            for col, weight in zip(x_cols, row)
-        }
-        if not all(feat in col_to_weight for feat in features):
             continue
 
         for feat in features:
@@ -174,13 +232,41 @@ def _mean_feature_weights_from_fit_cached(
 def clear_fitted_regressor_cache() -> None:
     """Clear cached fit-derived regressors after manual file updates."""
     _resolved_source_features_cached.cache_clear()
+    _subject_feature_weights_from_fit_cached.cache_clear()
     _mean_feature_weights_from_fit_cached.cache_clear()
 
 
-def weighted_sum_regressor(part, spec: FittedWeightRegressorSpec, *, dtype=np.float32) -> np.ndarray:
-    """Build a regressor by summing feature columns weighted by pooled fit values."""
+def _infer_single_subject(part) -> str | None:
+    if "subject" not in part.columns:
+        return None
+    subject_series = np.asarray(part["subject"])
+    unique = {
+        str(value)
+        for value in subject_series.tolist()
+        if value is not None and not (isinstance(value, float) and np.isnan(value))
+    }
+    if len(unique) != 1:
+        return None
+    return next(iter(unique))
+
+
+def weighted_sum_regressor(
+    part,
+    spec: FittedWeightRegressorSpec,
+    *,
+    dtype=np.float32,
+    subject: str | None = None,
+) -> np.ndarray:
+    """Build a regressor by summing feature columns weighted by fitted values."""
     features = resolved_source_features(spec)
-    weights = mean_feature_weights_from_fit(spec)
+    resolved_subject = str(subject) if subject is not None else _infer_single_subject(part)
+    if resolved_subject is not None:
+        try:
+            weights = subject_feature_weights_from_fit(spec, resolved_subject)
+        except (FileNotFoundError, ValueError):
+            weights = mean_feature_weights_from_fit(spec)
+    else:
+        weights = mean_feature_weights_from_fit(spec)
     missing_cols = [feat for feat in features if feat not in part.columns]
     if missing_cols:
         raise ValueError(
