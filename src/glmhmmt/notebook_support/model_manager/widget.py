@@ -400,6 +400,9 @@ class ModelManagerWidget(anywidget.AnyWidget):
     save_alias_clicks = traitlets.Int(0).tag(sync=True)
     delete_model_name = traitlets.Unicode("").tag(sync=True)
     delete_model_clicks = traitlets.Int(0).tag(sync=True)
+    command = traitlets.Unicode("").tag(sync=True)
+    command_payload = traitlets.Dict(default_value={}).tag(sync=True)
+    command_nonce = traitlets.Int(0).tag(sync=True)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -493,15 +496,36 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     @traitlets.observe("save_alias_clicks")
     def _on_save_alias_click(self, change):
-        if change["new"] <= 0:
+        if change["new"] <= change["old"]:
             return
         self._save_named_model()
 
     @traitlets.observe("delete_model_clicks")
     def _on_delete_model_click(self, change):
-        if change["new"] <= 0:
+        if change["new"] <= change["old"]:
             return
         self._delete_named_model()
+
+    @traitlets.observe("command_nonce")
+    def _on_command(self, change):
+        cmd = self.command
+        payload = self.command_payload or {}
+
+        try:
+            if cmd == "save_alias":
+                alias = str(payload.get("alias", self.alias))
+                self.alias = alias
+                self._save_named_model()
+            elif cmd == "delete_model":
+                self.delete_model_name = str(payload.get("name", self.delete_model_name))
+                self._delete_named_model()
+            elif cmd == "run_fit":
+                self.run_fit_clicks += 1
+            elif cmd:
+                self.alias_error = f"Unknown command: {cmd}"
+        finally:
+            self.command = ""
+            self.command_payload = {}
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

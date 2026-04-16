@@ -437,6 +437,13 @@ function render({ model, el }) {
     activeFilterKey: null,
   };
 
+  const sendCommand = (command, payload = {}) => {
+    model.set("command", command);
+    model.set("command_payload", payload);
+    model.set("command_nonce", (model.get("command_nonce") || 0) + 1);
+    model.save_changes();
+  };
+
   const scheduleUpdate = () => {
     if (scheduled || isDisposed) {
       return;
@@ -839,9 +846,7 @@ function render({ model, el }) {
       const name = e.target.dataset.deleteModel;
       if (!name) return;
       if (!window.confirm(`Delete model "${name}" and its folder?`)) return;
-      model.set("delete_model_name", name);
-      model.set("delete_model_clicks", model.get("delete_model_clicks") + 1);
-      model.save_changes();
+      sendCommand("delete_model", { name });
     });
 
     // Select All toggle
@@ -983,10 +988,11 @@ function render({ model, el }) {
     // Alias field + save button
     const commitAlias = ({ saveClick = false } = {}) => {
       aliasDirty = false;
-      model.set("alias", aliasDraft);
       if (saveClick) {
-        model.set("save_alias_clicks", model.get("save_alias_clicks") + 1);
+        sendCommand("save_alias", { alias: aliasDraft });
+        return;
       }
+      model.set("alias", aliasDraft);
       model.save_changes();
     };
 
@@ -1013,8 +1019,7 @@ function render({ model, el }) {
       if (model.get("is_running")) {
         return;
       }
-      model.set("run_fit_clicks", model.get("run_fit_clicks") + 1);
-      model.save_changes();
+      sendCommand("run_fit");
     });
   };
 

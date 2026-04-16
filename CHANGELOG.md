@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+- Switched model-manager actions to the same explicit JS-to-Python command channel used by the stable toml editor widget, avoiding direct JS click-counter mutations for save, delete, and run actions.
+- Added command-handler regression tests for save, delete, and run-fit flows.
+
 ## 0.1.13
 - Fixed bugs in the model manager widget.
 
