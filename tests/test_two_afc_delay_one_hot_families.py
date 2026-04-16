@@ -18,7 +18,7 @@ def two_afc_delay_module(monkeypatch):
     return module
 
 
-def test_two_afc_delay_build_feature_df_adds_session_bias_stim_hot_and_choice_lags(two_afc_delay_module):
+def test_two_afc_delay_build_feature_df_adds_session_bias_delay_hot_choice_lags_and_params(two_afc_delay_module):
     adapter = two_afc_delay_module.TwoAFCDelayAdapter()
     df_sub = pl.DataFrame(
         {
@@ -44,16 +44,22 @@ def test_two_afc_delay_build_feature_df_adds_session_bias_stim_hot_and_choice_la
     np.testing.assert_array_equal(feature_df["bias_1"].to_numpy(), np.asarray([0.0, 0.0, 1.0, 1.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["bias_2"].to_numpy(), np.zeros(4, dtype=np.float32))
 
-    np.testing.assert_array_equal(feature_df["stim_0"].to_numpy(), np.asarray([0.0, 0.0, 1.0, 0.0], dtype=np.float32))
-    np.testing.assert_array_equal(feature_df["stim_2"].to_numpy(), np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32))
-    np.testing.assert_array_equal(feature_df["stim_4"].to_numpy(), np.asarray([0.0, -1.0, 0.0, 0.0], dtype=np.float32))
-    np.testing.assert_array_equal(feature_df["stim_8"].to_numpy(), np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["delay_0"].to_numpy(), np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["delay_1"].to_numpy(), np.asarray([0.0, 1.0, 0.0, 0.0], dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["delay_2"].to_numpy(), np.asarray([0.0, 0.0, 1.0, 0.0], dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["delay_3"].to_numpy(), np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
 
     np.testing.assert_array_equal(feature_df["choice_lag_01"].to_numpy(), np.asarray([0.0, -1.0, 0.0, 1.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_02"].to_numpy(), np.zeros(4, dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_15"].to_numpy(), np.zeros(4, dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["bias_param"].to_numpy(), np.zeros(4, dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["delay_param"].to_numpy(), np.zeros(4, dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["choice_lag_param"].to_numpy(), np.zeros(4, dtype=np.float32))
 
     available_cols = adapter.available_emission_cols(feature_df)
+    assert "bias_param" in available_cols
+    assert "delay_param" in available_cols
+    assert "choice_lag_param" in available_cols
     assert "bias_0" in available_cols
-    assert "stim_8" in available_cols
+    assert "delay_3" in available_cols
     assert "choice_lag_15" in available_cols

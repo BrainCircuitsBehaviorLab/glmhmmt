@@ -37,6 +37,29 @@ ENV_TASK_PATHS = "GLMHMMT_TASK_PATHS"
 ENV_PLOT_PATHS = "GLMHMMT_PLOT_PATHS"
 
 
+def build_selector_groups(available_cols: list[str], registry: list[dict]) -> list[dict]:
+    """Filter *registry* to columns present in *available_cols*.
+
+    Columns not covered by any registry entry are appended as solo N-only groups
+    so they're always accessible.
+    """
+    available = set(available_cols)
+    registered: set[str] = set()
+    result: list[dict] = []
+
+    for group in registry:
+        filtered = {k: v for k, v in group["members"].items() if v in available}
+        if filtered:
+            result.append({**group, "members": filtered})
+            registered.update(filtered.values())
+
+    for col in available_cols:
+        if col not in registered:
+            result.append({"key": col, "label": col, "members": {"N": col}})
+
+    return result
+
+
 class TaskAdapter(ABC):
     """Abstract base for task-specific configuration & data loading."""
 
@@ -109,6 +132,14 @@ class TaskAdapter(ABC):
     def available_transition_cols(self) -> List[str]:
         """Ordered list of selectable transition regressors."""
         return self.default_transition_cols()
+
+    def build_emission_groups(self, available_cols: List[str]) -> list[dict]:
+        """Return widget emission groups for the task selector."""
+        return build_selector_groups(list(available_cols), [])
+
+    def build_transition_groups(self, available_cols: List[str]) -> list[dict]:
+        """Return widget transition groups for the task selector."""
+        return build_selector_groups(list(available_cols), [])
 
     def resolve_design_names(
         self,

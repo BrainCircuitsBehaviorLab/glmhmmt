@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import importlib
 
 workspace_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(workspace_root / "glmhmmt" / "src"))
+sys.path.insert(0, str(workspace_root / "NMDAR_paper"))
+importlib.import_module("src.process.two_afc")
+importlib.import_module("src.process.two_afc_delay")
+importlib.import_module("src.process.MCDR")
 
 from glmhmmt.notebook_support.model_manager import widget as widget_module
 from glmhmmt.notebook_support.model_manager.widget import _build_2afc_emission_groups
@@ -59,8 +64,10 @@ def test_refresh_groups_uses_hidden_families_for_2afc_delay(monkeypatch, tmp_pat
     widget.emission_cols_options = [
         "bias",
         "stim",
-        "stim_0",
-        "stim_2",
+        "delay",
+        "delay_param",
+        "delay_0p1",
+        "delay_3",
         "bias_0",
         "bias_1",
         "at_choice",
@@ -72,9 +79,43 @@ def test_refresh_groups_uses_hidden_families_for_2afc_delay(monkeypatch, tmp_pat
     widget._refresh_groups()
 
     by_key = {group["key"]: group for group in widget.emission_groups}
-    assert by_key["stim_hot"]["toggle_members"] == ["stim_2"]
+    assert by_key["delay_hot"]["toggle_members"] == ["delay_0p1", "delay_3"]
     assert by_key["bias_hot"]["toggle_members"] == ["bias_0", "bias_1"]
     assert by_key["at_choice_lag"]["toggle_members"] == ["choice_lag_01", "choice_lag_02"]
-    assert "stim_2" not in by_key
+    assert "delay_3" not in by_key
     assert "bias_0" not in by_key
     assert "choice_lag_01" not in by_key
+
+
+def test_build_mcdr_emission_groups_hides_stim_hot_members():
+    groups = widget_module._build_mcdr_emission_groups(
+        [
+            "bias",
+            "bias_param",
+            "bias_0",
+            "bias_1",
+            "A_L",
+            "A_C",
+            "A_R",
+            "choice_lag_param",
+            "choice_lag_01L",
+            "choice_lag_01C",
+            "choice_lag_01R",
+            "stim_param",
+            "stim1L",
+            "stim1C",
+            "stim1R",
+            "stim4L",
+            "stim4C",
+            "stim4R",
+        ]
+    )
+    by_key = {group["key"]: group for group in groups}
+
+    assert by_key["bias_hot"]["toggle_members"] == ["bias_0", "bias_1"]
+    assert by_key["stim_hot"]["toggle_members"] == ["stim1L", "stim1C", "stim1R", "stim4L", "stim4C", "stim4R"]
+    assert by_key["stim_hot"]["hide_members"] is True
+    assert by_key["stim_param"]["members"] == {"N": "stim_param"}
+    assert by_key["choice_lag_param"]["members"] == {"N": "choice_lag_param"}
+    assert "stim1L" not in by_key
+    assert "stim4R" not in by_key

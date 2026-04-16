@@ -24,7 +24,7 @@ from glmhmmt.notebook_support.analysis_common import (
     remote_fits_enabled,
 )
 from glmhmmt.runtime import get_runtime_paths
-from glmhmmt.tasks import get_adapter, get_task_options
+from glmhmmt.tasks import build_selector_groups, get_adapter, get_task_options
 
 
 _ASSET_DIR = Path(__file__).parent
@@ -33,53 +33,8 @@ _ASSET_DIR = Path(__file__).parent
 def _paths():
     return get_runtime_paths()
 
-# ── Regressor group registries ───────────────────────────────────────────────
-# Shape: list of {"key": str, "label": str, "members": {"L"|"C"|"R"|"N": col}}
-# JS renders: Label | L | N/C | R  columns.
-
-_MCDR_EMISSION_GROUPS: list[dict] = [
-    {"key": "bias",      "label": "bias",       "members": {"N": "bias"}},
-    {"key": "bias_side", "label": "bias side",  "members": {"L": "biasL",    "C": "biasC",    "R": "biasR"}},
-    {"key": "onset",     "label": "onset",      "members": {"L": "onsetL",   "C": "onsetC",   "R": "onsetR"}},
-    {"key": "delay",     "label": "delay",      "members": {"N": "delay"}},
-    {"key": "S",         "label": "S",          "members": {"L": "SL",       "C": "SC",       "R": "SR"}},
-    {"key": "SxDelay",   "label": "S×delay",    "members": {"L": "SLxdelay", "C": "SCxdelay", "R": "SRxdelay"}},
-    {"key": "D",         "label": "D (type)",   "members": {"N": "D"}},
-    {"key": "D_side",    "label": "D side",     "members": {"L": "DL",       "C": "DC",       "R": "DR"}},
-    {"key": "A",         "label": "A (action)", "members": {"L": "A_L",      "C": "A_C",      "R": "A_R"}},
-    {"key": "stim1",     "label": "stim 1",     "members": {"L": "stim1L",   "C": "stim1C",   "R": "stim1R"}},
-    {"key": "stim2",     "label": "stim 2",     "members": {"L": "stim2L",   "C": "stim2C",   "R": "stim2R"}},
-    {"key": "stim3",     "label": "stim 3",     "members": {"L": "stim3L",   "C": "stim3C",   "R": "stim3R"}},
-    {"key": "stim4",     "label": "stim 4",     "members": {"L": "stim4L",   "C": "stim4C",   "R": "stim4R"}},
-    {"key": "speed1",    "label": "speed 1",    "members": {"N": "speed1"}},
-    {"key": "speed2",    "label": "speed 2",    "members": {"N": "speed2"}},
-    {"key": "speed3",    "label": "speed 3",    "members": {"N": "speed3"}},
-]
-
-_2AFC_EMISSION_GROUPS: list[dict] = [
-    {"key": "bias",          "label": "bias",            "members": {"N": "bias"}},
-    {"key": "bias_param",    "label": "bias param",      "members": {"N": "bias_param"}},
-    {"key": "stim_vals",     "label": "stim vals",       "members": {"N": "stim_vals"}},
-    {"key": "stim_param",    "label": "stim param",      "members": {"N": "stim_param"}},
-    {"key": "stim_strength", "label": "stim strength",   "members": {"N": "stim_strength"}},
-    {"key": "at_choice",     "label": "action (choice)", "members": {"N": "at_choice"}},
-    {"key": "at_choice_param", "label": "choice param",  "members": {"N": "at_choice_param"}},
-    {"key": "at_error",      "label": "action (error)",  "members": {"N": "at_error"}},
-    {"key": "at_correct",    "label": "action (correct)","members": {"N": "at_correct"}},
-    {"key": "reward_trace",  "label": "reward trace",    "members": {"N": "reward_trace"}},
-    {"key": "prev_choice",   "label": "prev choice",     "members": {"N": "prev_choice"}},
-    {"key": "wsls",          "label": "WSLS",            "members": {"N": "wsls"}},
-]
-
-_BINARY_TASK_KEYS = {"2AFC", "2AFC_DELAY", "2AFC_DRUG", "NUO_AUDITORY"}
 _CONDITION_FILTER_TASKS = {"2AFC_DRUG"}
 _CONDITION_FILTER_OPTIONS = ["all", "saline", "drug"]
-
-_MCDR_TRANSITION_GROUPS: list[dict] = [
-    {"key": "A_plus",  "label": "A+",         "members": {"N": "A_plus"}},
-    {"key": "A_minus", "label": "A−",         "members": {"N": "A_minus"}},
-    {"key": "A_trans", "label": "A (action)", "members": {"L": "A_L", "C": "A_C", "R": "A_R"}},
-]
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -95,201 +50,15 @@ def _normalize_cv_mode(cv_mode: str) -> str:
 
 
 def _build_regressor_groups(available_cols: list[str], registry: list[dict]) -> list[dict]:
-    """Filter *registry* to columns present in *available_cols*.
-
-    Columns not covered by any registry entry are appended as solo N-only groups
-    so they're always accessible (e.g., dynamic sf_* columns in 2AFC).
-    """
-    available = set(available_cols)
-    registered: set[str] = set()
-    result: list[dict] = []
-
-    for group in registry:
-        filtered = {k: v for k, v in group["members"].items() if v in available}
-        if filtered:
-            result.append({**group, "members": filtered})
-            registered.update(filtered.values())
-
-    # Append any column not yet covered as a singleton group
-    for col in available_cols:
-        if col not in registered:
-            result.append({"key": col, "label": col, "members": {"N": col}})
-
-    return result
-
-
-def _numeric_suffix(name: str, prefix: str) -> tuple[int, str]:
-    suffix = name.removeprefix(prefix)
-    return (int(suffix), name) if suffix.isdigit() else (10**9, name)
+    return build_selector_groups(available_cols, registry)
 
 
 def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
-    """Build the 2AFC selector groups, hiding one-hot families behind row toggles."""
-    available = set(available_cols)
-    result: list[dict] = []
-    registered: set[str] = set()
-
-    def add_scalar(group: dict) -> None:
-        filtered = {k: v for k, v in group["members"].items() if v in available}
-        if not filtered:
-            return
-        result.append({**group, "members": filtered})
-        registered.update(filtered.values())
-
-    def add_hidden_family(
-        *,
-        key: str,
-        label: str,
-        family_cols: list[str],
-        toggle_cols: list[str] | None = None,
-    ) -> None:
-        if not family_cols:
-            return
-        members = list(toggle_cols if toggle_cols is not None else family_cols)
-        if not members:
-            registered.update(family_cols)
-            return
-        result.append(
-            {
-                "key": key,
-                "label": label,
-                "members": {},
-                "toggle_members": members,
-                "hide_members": True,
-            }
-        )
-        registered.update(family_cols)
-
-    stim_cols = sorted(
-        [
-            col
-            for col in available_cols
-            if col.startswith("stim_") and col.removeprefix("stim_").isdigit()
-        ],
-        key=lambda col: _numeric_suffix(col, "stim_"),
-    )
-    bias_hot_cols = sorted(
-        [
-            col
-            for col in available_cols
-            if col.startswith("bias_") and col.removeprefix("bias_").isdigit()
-        ],
-        key=lambda col: _numeric_suffix(col, "bias_"),
-    )
-    choice_lag_cols = sorted(
-        [
-            col
-            for col in available_cols
-            if col.startswith("choice_lag_") and col.removeprefix("choice_lag_").isdigit()
-        ],
-        key=lambda col: _numeric_suffix(col, "choice_lag_"),
-    )
-
-    for group in _2AFC_EMISSION_GROUPS:
-        key = group["key"]
-        if key == "bias":
-            add_scalar(group)
-            add_hidden_family(
-                key="bias_hot",
-                label="bias_hot",
-                family_cols=bias_hot_cols,
-            )
-            continue
-        if key == "stim_param":
-            add_scalar(group)
-            add_hidden_family(
-                key="stim_hot",
-                label="stim_hot",
-                family_cols=stim_cols,
-                toggle_cols=[col for col in stim_cols if col != "stim_0"],
-            )
-            continue
-        if key == "at_choice":
-            add_scalar(group)
-            add_hidden_family(
-                key="at_choice_lag",
-                label="choice_lag",
-                family_cols=choice_lag_cols,
-            )
-            continue
-        add_scalar(group)
-
-    for col in available_cols:
-        if col not in registered:
-            result.append({"key": col, "label": col, "members": {"N": col}})
-
-    return result
+    return get_adapter("2AFC").build_emission_groups(list(available_cols))
 
 
 def _build_mcdr_emission_groups(available_cols: list[str]) -> list[dict]:
-    """Build the MCDR selector groups, including dynamic lag/session families."""
-    available = set(available_cols)
-    result: list[dict] = []
-    registered: set[str] = set()
-
-    def add_group(group: dict) -> None:
-        filtered = {k: v for k, v in group["members"].items() if v in available}
-        if not filtered:
-            return
-        result.append({**group, "members": filtered})
-        registered.update(filtered.values())
-
-    def add_hidden_family(*, key: str, label: str, family_cols: list[str]) -> None:
-        if not family_cols:
-            return
-        result.append(
-            {
-                "key": key,
-                "label": label,
-                "members": {},
-                "toggle_members": family_cols,
-                "hide_members": True,
-            }
-        )
-        registered.update(family_cols)
-
-    bias_hot_cols = sorted(
-        [
-            col
-            for col in available_cols
-            if col.startswith("bias_") and col.removeprefix("bias_").isdigit()
-        ],
-        key=lambda col: _numeric_suffix(col, "bias_"),
-    )
-    choice_lag_rows: dict[str, dict[str, str]] = {}
-    for col in available_cols:
-        match = re.fullmatch(r"choice_lag_(\d+)([LCR])", col)
-        if match is None:
-            continue
-        lag_key = match.group(1)
-        side = match.group(2)
-        choice_lag_rows.setdefault(lag_key, {})[side] = col
-
-    for group in _MCDR_EMISSION_GROUPS:
-        add_group(group)
-        if group["key"] == "bias":
-            add_hidden_family(
-                key="bias_hot",
-                label="bias_hot",
-                family_cols=bias_hot_cols,
-            )
-        if group["key"] == "A":
-            for lag_key in sorted(choice_lag_rows, key=int):
-                members = choice_lag_rows[lag_key]
-                result.append(
-                    {
-                        "key": f"choice_lag_{lag_key}",
-                        "label": f"choice lag {int(lag_key)}",
-                        "members": {side: members[side] for side in ("L", "C", "R") if side in members},
-                    }
-                )
-                registered.update(members.values())
-
-    for col in available_cols:
-        if col not in registered:
-            result.append({"key": col, "label": col, "members": {"N": col}})
-
-    return result
+    return get_adapter("MCDR").build_emission_groups(list(available_cols))
 
 
 def _count_fitted_subjects(model_dir: Path) -> int:
@@ -350,12 +119,10 @@ def _summarize_selected_regressors(selected_cols: list[str], groups: list[dict])
 
 
 def _format_emission_regressor_summary(task: str, emission_cols: list[str]) -> str:
-    if task in _BINARY_TASK_KEYS:
-        groups = _build_2afc_emission_groups(emission_cols)
-    elif task == "MCDR":
-        groups = _build_mcdr_emission_groups(emission_cols)
-    else:
-        groups = _build_regressor_groups(emission_cols, _MCDR_EMISSION_GROUPS)
+    try:
+        groups = get_adapter(task).build_emission_groups(list(emission_cols))
+    except Exception:
+        groups = build_selector_groups(list(emission_cols), [])
     return ", ".join(_summarize_selected_regressors(emission_cols, groups))
 
 
@@ -832,16 +599,15 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     def _refresh_groups(self) -> None:
         """Rebuild emission_groups / transition_groups from current *_options traits."""
-        if self.task.upper() in _BINARY_TASK_KEYS:
-            self.emission_groups = _build_2afc_emission_groups(self.emission_cols_options)
-            self.transition_groups = []
+        try:
+            adapter = get_adapter(self.task)
+        except Exception:
+            self.emission_groups = build_selector_groups(list(self.emission_cols_options), [])
+            self.transition_groups = build_selector_groups(list(self.transition_cols_options), [])
             return
-        if self.task.upper() == "MCDR":
-            self.emission_groups = _build_mcdr_emission_groups(self.emission_cols_options)
-            self.transition_groups = _build_regressor_groups(self.transition_cols_options, _MCDR_TRANSITION_GROUPS)
-            return
-        self.emission_groups = _build_regressor_groups(self.emission_cols_options, _MCDR_EMISSION_GROUPS)
-        self.transition_groups = _build_regressor_groups(self.transition_cols_options, _MCDR_TRANSITION_GROUPS)
+
+        self.emission_groups = adapter.build_emission_groups(list(self.emission_cols_options))
+        self.transition_groups = adapter.build_transition_groups(list(self.transition_cols_options))
 
     def _clear_adapter_state(self) -> None:
         self.is_2afc = False

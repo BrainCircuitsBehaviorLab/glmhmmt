@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18
+- Replaced the raw `2AFC_delay` stimulus one-hot family with `delay_hot`, and added `bias_param`, `delay_param`, and `choice_lag_param` columns to the `2AFC_delay` and `MCDR` task adapters.
+- Collapsed the `MCDR` `stim1..4{L,C,R}` family under a single hidden `stim_hot` widget row and exposed the pooled `stim_param` plus `choice_lag_param` scalar rows alongside the grouped raw families.
+- Moved model-manager regressor grouping onto the task adapters, so the widget now asks each adapter for its emission and transition groups instead of hard-coding task-specific selector layouts.
+
 ## 0.1.17
 - Switched the model-manager anywidget assets from in-memory JS/CSS strings to file-backed assets so marimo no longer serves them through ephemeral virtual-file shared-memory blobs.
 - Kept the simplified load-existing table and server-owned selection lifecycle, so stop/rerun and task/model switches stay backend-driven.

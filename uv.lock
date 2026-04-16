@@ -932,7 +932,7 @@ wheels = [
 
 [[package]]
 name = "glmhmmt"
-version = "0.1.17"
+version = "0.1.18"
 source = { editable = "." }
 dependencies = [
     { name = "anywidget" },

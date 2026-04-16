@@ -18,7 +18,7 @@ def mcdr_module(monkeypatch):
     return module
 
 
-def test_mcdr_build_feature_df_adds_session_bias_and_choice_lags(mcdr_module):
+def test_mcdr_build_feature_df_adds_session_bias_choice_lags_and_params(mcdr_module):
     adapter = mcdr_module.MCDRAdapter()
     df_sub = pl.DataFrame(
         {
@@ -55,7 +55,14 @@ def test_mcdr_build_feature_df_adds_session_bias_and_choice_lags(mcdr_module):
     np.testing.assert_array_equal(feature_df["choice_lag_01R"].to_numpy(), np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_02L"].to_numpy(), np.zeros(4, dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_15R"].to_numpy(), np.zeros(4, dtype=np.float32))
+    assert feature_df["stim_param"].dtype == pl.Float32
+    np.testing.assert_array_equal(feature_df["bias_param"].to_numpy(), np.zeros(4, dtype=np.float32))
+    np.testing.assert_array_equal(feature_df["choice_lag_param"].to_numpy(), np.zeros(4, dtype=np.float32))
 
     available_cols = adapter.available_emission_cols(feature_df)
+    assert "bias_param" in available_cols
+    assert "choice_lag_param" in available_cols
+    assert "stim_param" in available_cols
     assert "bias_0" in available_cols
     assert "choice_lag_15L" in available_cols
+    assert "stim4R" in available_cols
