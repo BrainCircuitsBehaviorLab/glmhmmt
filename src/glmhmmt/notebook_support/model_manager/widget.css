@@ -162,6 +162,14 @@
     box-shadow: 0 1px 2px rgba(0, 54, 96, 0.1);
 }
 
+.mm-chip,
+.mm-select-all,
+.mm-pill,
+.mm-group-header,
+.mm-btn-delete-row {
+    font-family: inherit;
+}
+
 /* ── Select All button ──────────────────────────────────────────────────── */
 .mm-select-all {
     display: inline-flex;
@@ -317,6 +325,98 @@
     color: #9ca3af;
     font-style: italic;
     margin: 8px 0;
+}
+
+.mm-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+
+.mm-group-card {
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mm-group-card.selected {
+    border-color: var(--brand-light);
+    background: var(--brand-bg);
+}
+
+.mm-group-card.partial {
+    border-color: #93c5fd;
+    background: #f0f7ff;
+}
+
+.mm-group-header {
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    text-align: left;
+}
+
+.mm-group-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.mm-group-state {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #6b7280;
+}
+
+.mm-group-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.mm-pill {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #475569;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mm-pill:hover,
+.mm-group-header:hover .mm-group-title {
+    color: var(--brand-main);
+}
+
+.mm-pill.selected,
+.mm-pill-wide.selected {
+    border-color: var(--brand-light);
+    background: var(--brand-bg);
+    color: var(--brand-main);
+}
+
+.mm-pill.partial,
+.mm-pill-wide.partial {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.mm-pill-wide {
+    width: 100%;
 }
 
 /* ── Frozen emission editor ─────────────────────────────────────────────── */
@@ -577,6 +677,60 @@
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
+}
+
+.mm-load-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.mm-load-card {
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    cursor: pointer;
+}
+
+.mm-load-card.selected {
+    border-color: var(--brand-light);
+    background: var(--brand-bg);
+}
+
+.mm-load-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.mm-load-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 800;
+    font-size: 16px;
+    color: #111827;
+    margin-bottom: 6px;
+}
+
+.mm-load-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 8px;
+}
+
+.mm-load-detail {
+    font-size: 13px;
+    color: #374151;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
 }
 
 /* ── Load Existing table ────────────────────────────────────────────────── */
@@ -952,6 +1106,53 @@
         border-color: #3b82f6;
     }
 
+    .mm-group-card {
+        background: #1f2937;
+        border-color: #374151;
+    }
+
+    .mm-group-card.selected {
+        background: rgba(59, 130, 246, 0.14);
+        border-color: #3b82f6;
+    }
+
+    .mm-group-card.partial {
+        background: rgba(59, 130, 246, 0.1);
+        border-color: #60a5fa;
+    }
+
+    .mm-group-title,
+    .mm-load-name {
+        color: #f9fafb;
+    }
+
+    .mm-group-state,
+    .mm-load-meta,
+    .mm-load-detail {
+        color: #9ca3af;
+    }
+
+    .mm-pill,
+    .mm-pill-wide {
+        background: #111827;
+        color: #d1d5db;
+        border-color: #4b5563;
+    }
+
+    .mm-pill.selected,
+    .mm-pill-wide.selected {
+        background: rgba(59, 130, 246, 0.2);
+        color: #93c5fd;
+        border-color: #3b82f6;
+    }
+
+    .mm-pill.partial,
+    .mm-pill-wide.partial {
+        background: rgba(59, 130, 246, 0.16);
+        color: #bfdbfe;
+        border-color: #60a5fa;
+    }
+
     /* Select All */
     .mm-select-all {
         border-color: #4b5563;
@@ -1217,6 +1418,16 @@
     .mm-btn-delete-row:hover {
         background: rgba(127, 29, 29, 0.3);
         border-color: #ef4444;
+    }
+
+    .mm-load-card {
+        background: #1f2937;
+        border-color: #374151;
+    }
+
+    .mm-load-card.selected {
+        background: rgba(59, 130, 246, 0.14);
+        border-color: #3b82f6;
     }
 
     .mm-table td {

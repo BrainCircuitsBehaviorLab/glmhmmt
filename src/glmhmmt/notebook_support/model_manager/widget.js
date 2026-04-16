@@ -1,12 +1,3 @@
-/**
- * ModelManagerWidget — anywidget render function.
- *
- * Python is the source of truth for all data (groups, options, defaults).
- * This file only handles rendering and wiring DOM events back to traitlets.
- */
-
-// ── Rendering helpers ─────────────────────────────────────────────────────────
-
 function escapeHTML(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -16,348 +7,119 @@ function escapeHTML(value) {
     .replace(/'/g, "&#39;");
 }
 
-function compareTableValues(a, b) {
-  const aNum = typeof a === "number" ? a : Number(String(a ?? "").trim());
-  const bNum = typeof b === "number" ? b : Number(String(b ?? "").trim());
-  const aIsNum = Number.isFinite(aNum) && String(a ?? "").trim() !== "";
-  const bIsNum = Number.isFinite(bNum) && String(b ?? "").trim() !== "";
-
-  if (aIsNum && bIsNum) {
-    return aNum - bNum;
+function membersForGroup(group) {
+  if (Array.isArray(group.toggle_members) && group.toggle_members.length > 0) {
+    return [...group.toggle_members];
   }
-
-  return String(a ?? "").localeCompare(String(b ?? ""), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return Object.values(group.members || {});
 }
 
-function getLoadTableColumns(showTransitionRegressors) {
-  const columns = [
-    {
-      key: "name",
-      label: "Model Name",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.name ?? "",
-      renderCell: (info) => `
-        <strong>${escapeHTML(info.name)}</strong>
-        ${info.id === "__default__" ? '<span class="mm-default-badge">default</span>' : ""}
-      `,
-    },
-    {
-      key: "subjects",
-      label: "Subjects",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.subjects ?? "",
-    },
-    {
-      key: "K",
-      label: "K",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.K ?? "",
-    },
-    {
-      key: "regressors",
-      label: "Regressors",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.regressors ?? "",
-      cellClassName: "mm-wrap",
-    },
-  ];
-
-  if (showTransitionRegressors) {
-    columns.push({
-      key: "transition_regressors",
-      label: "Transition Regressors",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.transition_regressors ?? "",
-      cellClassName: "mm-wrap",
-    });
+function selectedState(selectedSet, members) {
+  if (!members.length) {
+    return "none";
   }
-
-  columns.push(
-    {
-      key: "cv",
-      label: "CV",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.cv ?? "none",
-    },
-    {
-      key: "tau",
-      label: "Tau",
-      sortable: true,
-      filterable: true,
-      getValue: (info) => info.tau ?? "",
-    },
-    {
-      key: "actions",
-      label: "Actions",
-      sortable: false,
-      filterable: false,
-      headerClassName: "mm-actions-cell",
-      cellClassName: "mm-actions-cell",
-      getValue: () => "",
-      renderCell: (info) => (
-        info.id === "__default__"
-          ? ""
-          : `<button type="button" class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
-      ),
-    }
-  );
-
-  return columns;
+  const count = members.filter((member) => selectedSet.has(member)).length;
+  if (count === 0) {
+    return "none";
+  }
+  if (count === members.length) {
+    return "all";
+  }
+  return "partial";
 }
 
-function getFilteredLoadRows(rows, columns, filters) {
-  return rows.filter((info) => columns.every((column) => {
-    if (!column.filterable) return true;
-    const filterValue = String(filters[column.key] || "").trim().toLowerCase();
-    if (!filterValue) return true;
-    return String(column.getValue(info) ?? "").toLowerCase().includes(filterValue);
-  }));
+function renderSelectAll(subjectsList, currentSubjects) {
+  const total = subjectsList.length;
+  const count = currentSubjects.length;
+  const state = total > 0 && count === total ? "selected" : count > 0 ? "partial" : "";
+  const label = total > 0 && count === total ? "Deselect All" : "Select All";
+  return `<button type="button" class="mm-select-all ${state}" id="btn-select-all">${label}</button>`;
 }
 
-function getSortedLoadRows(rows, columns, sortKey, sortDir) {
-  if (!sortKey) return [...rows];
-  const column = columns.find((item) => item.key === sortKey && item.sortable);
-  if (!column) return [...rows];
-
-  const direction = sortDir === "desc" ? -1 : 1;
-  return [...rows].sort((left, right) => {
-    const primary = compareTableValues(column.getValue(left), column.getValue(right));
-    if (primary !== 0) {
-      return primary * direction;
-    }
-    return compareTableValues(left.name || "", right.name || "");
-  });
-}
-
-function renderLoadSortButton(column, loadTableState) {
-  if (!column.sortable) return "";
-
-  const isActive = loadTableState.sortKey === column.key;
-  const indicator = isActive
-    ? (loadTableState.sortDir === "desc" ? "↓" : "↑")
-    : "↕";
-
+function renderSubjectChips(subjectsList, currentSubjects) {
   return `
-    <button
-      type="button"
-      class="mm-sort-btn ${isActive ? "active" : ""}"
-      data-sort-key="${column.key}"
-      aria-label="Sort by ${escapeHTML(column.label)}"
-      title="Sort by ${escapeHTML(column.label)}"
-    >${indicator}</button>
-  `;
-}
-
-function renderLoadFilterPopover(column, loadTableState) {
-  if (loadTableState.activeFilterKey !== column.key) return "";
-
-  const currentValue = escapeHTML(loadTableState.filters[column.key] || "");
-  return `
-    <div class="mm-filter-popover" data-filter-popover="${column.key}">
-      <div class="mm-filter-popover-title">${escapeHTML(column.label)}</div>
-      <label class="mm-filter-popover-label" for="mm-filter-${column.key}">Contains</label>
-      <input
-        id="mm-filter-${column.key}"
-        type="text"
-        class="mm-filter-input-popup"
-        data-filter-input="${column.key}"
-        value="${currentValue}"
-        placeholder="Type text to match"
-      >
-      <div class="mm-filter-popover-actions">
-        <button type="button" class="mm-filter-popover-btn primary" data-apply-filter="${column.key}">Apply</button>
-        <button type="button" class="mm-filter-popover-btn" data-clear-filter="${column.key}">Clear</button>
-      </div>
+    <div class="mm-chip-container subjects-grid">
+      ${subjectsList
+        .map(
+          (subject) => `
+            <button
+              type="button"
+              class="mm-chip ${currentSubjects.includes(subject) ? "selected" : ""}"
+              data-subject="${escapeHTML(subject)}"
+            >${escapeHTML(subject)}</button>
+          `,
+        )
+        .join("")}
     </div>
   `;
 }
 
-function renderLoadFilterButton(column, loadTableState) {
-  if (!column.filterable) {
-    return '<span class="mm-filter-placeholder"></span>';
-  }
-
-  const isOpen = loadTableState.activeFilterKey === column.key;
-  const isFiltered = Boolean(String(loadTableState.filters[column.key] || "").trim());
-
-  return `
-    <button
-      type="button"
-      class="mm-filter-btn ${isOpen ? "open" : ""} ${isFiltered ? "active" : ""}"
-      data-filter-key="${column.key}"
-      aria-pressed="${isOpen ? "true" : "false"}"
-    >Filter</button>
-    ${renderLoadFilterPopover(column, loadTableState)}
-  `;
-}
-
-function renderLoadTable(existingInfo, existingVal, showTransitionRegressors, loadTableState) {
-  const columns = getLoadTableColumns(showTransitionRegressors);
-  const visibleKeys = new Set(columns.map((column) => column.key));
-
-  Object.keys(loadTableState.filters).forEach((key) => {
-    if (!visibleKeys.has(key)) {
-      delete loadTableState.filters[key];
-    }
-  });
-  if (!visibleKeys.has(loadTableState.sortKey)) {
-    loadTableState.sortKey = "name";
-    loadTableState.sortDir = "asc";
-  }
-  if (!visibleKeys.has(loadTableState.activeFilterKey)) {
-    loadTableState.activeFilterKey = null;
-  }
-
-  const filteredRows = getFilteredLoadRows(existingInfo, columns, loadTableState.filters);
-  const rows = getSortedLoadRows(filteredRows, columns, loadTableState.sortKey, loadTableState.sortDir);
-
-  const body = rows.length > 0
-    ? rows.map((info) => {
-        const isDefault = info.id === "__default__";
-        const isSelected = info.id === existingVal;
-        const rowClasses = [
-          "mm-tr",
-          isSelected ? "selected" : "",
-          isDefault ? "mm-tr-default" : "",
-        ].filter(Boolean).join(" ");
-
-        const cells = columns.map((column) => {
-          const cellClass = column.cellClassName ? ` ${column.cellClassName}` : "";
-          const content = column.renderCell
-            ? column.renderCell(info)
-            : escapeHTML(column.getValue(info));
-          return `<td class="${cellClass.trim()}">${content}</td>`;
-        }).join("");
-
-        return `
-          <tr class="${rowClasses}" data-model="${escapeHTML(info.id)}">
-            ${cells}
-          </tr>
-        `;
-      }).join("")
-    : `
-        <tr class="mm-table-empty-row">
-          <td class="mm-table-empty-cell" colspan="${columns.length}">
-            No models match the active filters.
-          </td>
-        </tr>
-      `;
-
-  return `
-    <div class="mm-table-container">
-      <table class="mm-table">
-        <thead>
-          <tr>
-            ${columns.map((column) => `
-              <th class="mm-table-th ${column.headerClassName || ""}">
-                <div class="mm-table-header-cell">
-                  <div class="mm-table-header-top">
-                    <span class="mm-table-header-label">${escapeHTML(column.label)}</span>
-                    ${renderLoadSortButton(column, loadTableState)}
-                  </div>
-                  <div class="mm-table-header-bottom">
-                    ${renderLoadFilterButton(column, loadTableState)}
-                  </div>
-                </div>
-              </th>
-            `).join("")}
-          </tr>
-        </thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-/**
- * Render a grouped regressor selector table.
- *
- * @param {Array}  groups      - emission_groups or transition_groups traitlet value
- * @param {Array}  selectedCols - emission_cols or transition_cols traitlet value
- * @param {string} dataAttr    - "emission" or "transition"
- *
- * Table columns: Label | L | N/C | R
- * - Row label cell: clicking toggles all members in that row
- * - Individual cells: clicking toggles just that regressor
- * - Row gets "selected" (all members active) or "partial" (some active) class
- */
-function renderRegressorTable(groups, selectedCols, dataAttr) {
+function renderGroupSelectors(groups, selectedCols, attrName) {
   if (!groups || groups.length === 0) {
     return '<p class="mm-empty-note">No regressors available.</p>';
   }
 
-  const sel = new Set(selectedCols);
-
-  let rows = "";
-  for (const group of groups) {
-    const members   = group.members;           // { L?, C?, N?, R? } → col name
-    const allCols   = Array.isArray(group.toggle_members) && group.toggle_members.length > 0
-      ? group.toggle_members
-      : Object.values(members);
-    const allSel    = allCols.every(c => sel.has(c));
-    const someSel   = allCols.some(c =>  sel.has(c));
-    const rowClass  = allSel ? "selected" : someSel ? "partial" : "";
-    const hideMembers = Boolean(group.hide_members);
-
-    // Encode member list in the label cell so the click handler can toggle all
-    const membersJSON = JSON.stringify(allCols).replace(/'/g, "&#39;");
-
-    const cellFor = (side) => {
-      if (hideMembers) {
-        return `<td class="mm-reg-cell mm-reg-empty"></td>`;
-      }
-      const col = members[side];
-      if (!col) return `<td class="mm-reg-cell mm-reg-empty"></td>`;
-      const active = sel.has(col) ? "selected" : "";
-      return `<td class="mm-reg-cell ${active}" data-${dataAttr}="${escapeHTML(col)}">${escapeHTML(col)}</td>`;
-    };
-
-    // N/C column: prefer C (sided neutral) over N (global)
-    const ncCell = members["C"] ? cellFor("C") : cellFor("N");
-
-    rows += `
-      <tr class="mm-reg-row ${rowClass}">
-        <td class="mm-reg-row-label ${rowClass}"
-            data-${dataAttr}-group="${escapeHTML(group.key)}"
-            data-${dataAttr}-members='${membersJSON}'
-        >${escapeHTML(group.label)}</td>
-        ${cellFor("L")}${ncCell}${cellFor("R")}
-      </tr>`;
-  }
+  const selectedSet = new Set(selectedCols || []);
 
   return `
-    <table class="mm-reg-table">
-      <thead>
-        <tr>
-          <th class="mm-reg-th-label">Regressor</th>
-          <th class="mm-reg-th-side">L</th>
-          <th class="mm-reg-th-side">N / C</th>
-          <th class="mm-reg-th-side">R</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
+    <div class="mm-group-grid">
+      ${groups
+        .map((group) => {
+          const groupMembers = membersForGroup(group);
+          const groupState = selectedState(selectedSet, groupMembers);
+          const groupStateClass = groupState === "all" ? "selected" : groupState === "partial" ? "partial" : "";
+          const groupMembersJSON = JSON.stringify(groupMembers).replace(/'/g, "&#39;");
+          const hideMembers = Boolean(group.hide_members);
+          const visibleSides = ["L", "C", "N", "R"];
 
-/**
- * Render the "Select All" toggle button above the subjects grid.
- * State classes: "selected" (all), "partial" (some), "" (none).
- */
-function renderSelectAll(subjectsList, currentSubjects) {
-  const allSel  = subjectsList.length > 0 && currentSubjects.length === subjectsList.length;
-  const someSel = currentSubjects.length > 0 && currentSubjects.length < subjectsList.length;
-  const cls     = allSel ? "selected" : someSel ? "partial" : "";
-  const label   = allSel ? "Deselect All" : "Select All";
-  return `<button type="button" class="mm-select-all ${cls}" id="btn-select-all">${label}</button>`;
+          let pills = "";
+          if (hideMembers) {
+            pills = `
+              <button
+                type="button"
+                class="mm-pill mm-pill-wide ${groupStateClass}"
+                data-${attrName}-group="${escapeHTML(group.key)}"
+                data-${attrName}-members='${groupMembersJSON}'
+              >Toggle group</button>
+            `;
+          } else {
+            pills = visibleSides
+              .map((side) => {
+                const member = group.members ? group.members[side] : null;
+                if (!member) {
+                  return "";
+                }
+                const active = selectedSet.has(member) ? "selected" : "";
+                const sideLabel = side === "C" ? "C" : side === "N" ? "N" : side;
+                return `
+                  <button
+                    type="button"
+                    class="mm-pill ${active}"
+                    data-${attrName}="${escapeHTML(member)}"
+                  >${sideLabel}</button>
+                `;
+              })
+              .join("");
+          }
+
+          return `
+            <div class="mm-group-card ${groupStateClass}">
+              <button
+                type="button"
+                class="mm-group-header ${groupStateClass}"
+                data-${attrName}-group="${escapeHTML(group.key)}"
+                data-${attrName}-members='${groupMembersJSON}'
+              >
+                <span class="mm-group-title">${escapeHTML(group.label)}</span>
+                <span class="mm-group-state">${groupState === "all" ? "all" : groupState === "partial" ? "some" : "none"}</span>
+              </button>
+              <div class="mm-group-pills">${pills}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
@@ -372,7 +134,7 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
         <th class="mm-freeze-th" title="${escapeHTML(feature)}">
           <span class="mm-freeze-head-text">${escapeHTML(feature)}</span>
         </th>
-      `
+      `,
     )
     .join("");
 
@@ -422,20 +184,54 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
   `;
 }
 
-// ── Main render ───────────────────────────────────────────────────────────────
+function renderLoadList(existingInfo, existingVal, showTransitionRegressors) {
+  const rows = existingInfo || [];
+  if (!rows.length) {
+    return '<p class="mm-empty-note">No saved models were found.</p>';
+  }
+
+  return `
+    <div class="mm-load-list">
+      ${rows
+        .map((info) => {
+          const selected = info.id === existingVal ? "selected" : "";
+          const isDefault = info.id === "__default__";
+          return `
+            <div class="mm-load-card ${selected}" data-model="${escapeHTML(info.id)}">
+              <div class="mm-load-main">
+                <div class="mm-load-name">
+                  ${escapeHTML(info.name)}
+                  ${isDefault ? '<span class="mm-default-badge">default</span>' : ""}
+                </div>
+                <div class="mm-load-meta">
+                  <span>${escapeHTML(info.subjects)} subjects</span>
+                  <span>K ${escapeHTML(info.K)}</span>
+                  <span>tau ${escapeHTML(info.tau)}</span>
+                  <span>${escapeHTML(info.cv || "none")}</span>
+                </div>
+                <div class="mm-load-detail"><strong>Emission:</strong> ${escapeHTML(info.regressors || "")}</div>
+                ${
+                  showTransitionRegressors
+                    ? `<div class="mm-load-detail"><strong>Transition:</strong> ${escapeHTML(info.transition_regressors || "")}</div>`
+                    : ""
+                }
+              </div>
+              ${
+                isDefault
+                  ? ""
+                  : `<button type="button" class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
+              }
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
 
 function render({ model, el }) {
-  const containerId = "mm-" + Math.random().toString(36).substring(7);
   let aliasDraft = model.get("alias") || "";
   let aliasDirty = false;
-  let scheduled = false;
-  let isDisposed = false;
-  const loadTableState = {
-    sortKey: "name",
-    sortDir: "asc",
-    filters: {},
-    activeFilterKey: null,
-  };
 
   const sendCommand = (command, payload = {}) => {
     model.set("command", command);
@@ -444,120 +240,105 @@ function render({ model, el }) {
     model.save_changes();
   };
 
-  const scheduleUpdate = () => {
-    if (scheduled || isDisposed) {
-      return;
-    }
-    scheduled = true;
-    queueMicrotask(() => {
-      scheduled = false;
-      if (!isDisposed) {
-        updateUI();
-      }
-    });
+  const setTrait = (name, value) => {
+    model.set(name, value);
+    model.save_changes();
   };
 
-  const closeFilterPopover = (event) => {
-    if (loadTableState.activeFilterKey == null) {
-      return;
+  const toggleValues = (traitName, values) => {
+    const current = new Set(model.get(traitName) || []);
+    const allSelected = values.every((value) => current.has(value));
+    if (allSelected) {
+      values.forEach((value) => current.delete(value));
+    } else {
+      values.forEach((value) => current.add(value));
     }
-    const target = event.target;
-    if (target instanceof Node && el.contains(target)) {
-      return;
-    }
-    loadTableState.activeFilterKey = null;
-    updateUI();
+    setTrait(traitName, [...current]);
   };
 
-  const updateUI = () => {
-    const existingVal      = model.get("existing_model");
-    const is2afc           = model.get("is_2afc");
-    const isRunning        = model.get("is_running");
-    const modelType        = model.get("model_type");
-    const currentTask      = model.get("task");
-    const taskOptions      = model.get("task_options") || [];
+  const renderUI = () => {
+    const taskOptions = model.get("task_options") || [];
     const taskDiscoveryMessage = model.get("task_discovery_message") || "";
-    const mode             = model.get("ui_mode");
-    const KList            = model.get("k_options");
-    const currentK         = model.get("K");
-    const subjectsList     = model.get("subjects_list");
-    const currentSubjects  = model.get("subjects");
-    const currentEmission  = model.get("emission_cols");
-    const currentTransition = model.get("transition_cols");
-    const currentFrozen    = model.get("frozen_emissions") || {};
-    const currentTau       = model.get("tau");
-    const currentCvMode    = model.get("cv_mode");
-    const currentCvRepeats = model.get("cv_repeats");
+    const currentTask = model.get("task");
+    const mode = model.get("ui_mode");
+    const modelType = model.get("model_type");
+    const isRunning = model.get("is_running");
+    const is2afc = model.get("is_2afc");
+    const existingInfo = model.get("existing_models_info") || [];
+    const existingVal = model.get("existing_model");
+    const subjectsList = model.get("subjects_list") || [];
+    const currentSubjects = model.get("subjects") || [];
+    const currentK = model.get("K");
+    const kOptions = model.get("k_options") || [2, 3, 4, 5, 6];
+    const currentTau = model.get("tau");
+    const currentCvMode = model.get("cv_mode") || "none";
+    const currentCvRepeats = model.get("cv_repeats") || 5;
     const showConditionFilter = model.get("show_condition_filter");
     const conditionFilterOptions = model.get("condition_filter_options") || [];
     const currentConditionFilter = model.get("condition_filter") || "all";
     const currentLapseMode = model.get("lapse_mode") || "none";
-    const currentLapseMax  = model.get("lapse_max");
-    const currentAlias     = model.get("alias");
-    const aliasError       = model.get("alias_error");
-    const aliasStatus      = model.get("alias_status");
-    const savedModelName   = model.get("saved_model_name");
-    const existingInfo     = model.get("existing_models_info");
-    const emissionGroups   = model.get("emission_groups");
-    const transitionGroups = model.get("transition_groups");
+    const currentLapseMax = model.get("lapse_max") || 0.2;
+    const currentEmission = model.get("emission_cols") || [];
+    const currentTransition = model.get("transition_cols") || [];
+    const emissionGroups = model.get("emission_groups") || [];
+    const transitionGroups = model.get("transition_groups") || [];
+    const currentFrozen = model.get("frozen_emissions") || {};
+    const alias = model.get("alias") || "";
+    const aliasError = model.get("alias_error") || "";
+    const aliasStatus = model.get("alias_status") || "";
+    const savedModelName = model.get("saved_model_name") || "";
 
     if (!aliasDirty) {
-      aliasDraft = currentAlias;
+      aliasDraft = alias;
     }
 
-    const aliasMessage = aliasDirty
-      ? ""
-      : (aliasError || aliasStatus || (savedModelName ? `Current saved model: ${savedModelName}` : ""));
-    const aliasMessageClass = aliasError
-      ? "error"
-      : (aliasStatus ? "status" : "hint");
-
-    // ── Shell ───────────────────────────────────────────────────────────────
-    let html = `
-      <div class="mm-container" id="${containerId}">
-        <div class="mm-header">
-            <div class="mm-task-selector">
-              <label class="mm-label inline">Task:</label>
-              <select id="inp-task" class="mm-input small">
-                ${taskOptions.length
-                  ? taskOptions.map(opt => `
-                  <option value="${escapeHTML(opt.value)}" ${currentTask === opt.value ? "selected" : ""}>${escapeHTML(opt.label)}</option>
-                `).join("")
-                  : '<option value="" selected>No adapters found</option>'}
-              </select>
-            </div>
-          </div>
-        ${taskOptions.length ? `
-        <div class="mm-tabs">
-          <button type="button" class="mm-tab ${mode === 'new'  ? 'active' : ''}" data-mode="new">New Fit</button>
-          <button type="button" class="mm-tab ${mode === 'load' ? 'active' : ''}" data-mode="load">Load Existing</button>
-        </div>
-        <div class="mm-content">` : `
-        <div class="mm-content">
-          <div class="mm-empty-note">${escapeHTML(taskDiscoveryMessage || "No task adapters were found in the configured adapter folders.")}</div>
-        `} 
-    `;
+    const aliasMessage = aliasError || aliasStatus || (savedModelName ? `Current saved model: ${savedModelName}` : "");
+    const aliasMessageClass = aliasError ? "error" : aliasStatus ? "status" : "hint";
+    const showTransitionRegressors = modelType === "glmhmmt";
 
     if (!taskOptions.length) {
-      html += `
+      el.innerHTML = `
+        <div class="mm-content">
+          <p class="mm-empty-note">${escapeHTML(taskDiscoveryMessage || "No task adapters were found.")}</p>
         </div>
-      </div>
       `;
-      el.innerHTML = html;
       return;
     }
 
-    // ── Load Existing tab ───────────────────────────────────────────────────
+    let html = `
+      <div class="mm-container">
+        <div class="mm-header">
+          <div class="mm-task-selector">
+            <label class="mm-label inline">Task:</label>
+            <select id="inp-task" class="mm-input small">
+              ${taskOptions
+                .map(
+                  (opt) => `
+                    <option value="${escapeHTML(opt.value)}" ${currentTask === opt.value ? "selected" : ""}>
+                      ${escapeHTML(opt.label)}
+                    </option>
+                  `,
+                )
+                .join("")}
+            </select>
+          </div>
+        </div>
+
+        <div class="mm-tabs">
+          <button type="button" class="mm-tab ${mode === "new" ? "active" : ""}" data-mode="new">New Fit</button>
+          <button type="button" class="mm-tab ${mode === "load" ? "active" : ""}" data-mode="load">Load Existing</button>
+        </div>
+
+        <div class="mm-content">
+    `;
+
     if (mode === "load") {
-      const showTransitionRegressors = modelType === "glmhmmt";
       html += `
         <div class="mm-section">
-          <label class="mm-label">Select Saved Model</label>
-          ${renderLoadTable(existingInfo, existingVal, showTransitionRegressors, loadTableState)}
+          <label class="mm-label">Saved Models</label>
+          ${renderLoadList(existingInfo, existingVal, showTransitionRegressors)}
         </div>
       `;
-
-    // ── New Fit tab ─────────────────────────────────────────────────────────
     } else {
       html += `
         <div class="mm-flex-row">
@@ -565,12 +346,7 @@ function render({ model, el }) {
             <div class="mm-section">
               <label class="mm-label">Subjects</label>
               ${renderSelectAll(subjectsList, currentSubjects)}
-              <div class="mm-chip-container subjects-grid">
-                ${subjectsList.map(s => `
-                  <div class="mm-chip ${currentSubjects.includes(s) ? "selected" : ""}"
-                       data-subject="${escapeHTML(s)}">${escapeHTML(s)}</div>
-                `).join("")}
-              </div>
+              ${renderSubjectChips(subjectsList, currentSubjects)}
             </div>
       `;
 
@@ -579,12 +355,24 @@ function render({ model, el }) {
             <div class="mm-section">
               <label class="mm-label">Number of States (K)</label>
               <div class="mm-slider-wrap">
-                <input type="range" class="mm-range" id="inp-k-range"
-                       min="${Math.min(...KList)}" max="${Math.max(...KList)}"
-                       value="${currentK}" step="1">
-                <input type="number" class="mm-num-input" id="inp-k-num"
-                       min="${Math.min(...KList)}" max="${Math.max(...KList)}"
-                       value="${currentK}" step="1">
+                <input
+                  type="range"
+                  class="mm-range"
+                  id="inp-k-range"
+                  min="${Math.min(...kOptions)}"
+                  max="${Math.max(...kOptions)}"
+                  step="1"
+                  value="${currentK}"
+                >
+                <input
+                  type="number"
+                  class="mm-num-input"
+                  id="inp-k-num"
+                  min="${Math.min(...kOptions)}"
+                  max="${Math.max(...kOptions)}"
+                  step="1"
+                  value="${currentK}"
+                >
               </div>
             </div>
         `;
@@ -596,15 +384,15 @@ function render({ model, el }) {
           <div class="mm-col">
             <div class="mm-section">
               <label class="mm-label">Emission Regressors</label>
-              ${renderRegressorTable(emissionGroups, currentEmission, "emission")}
+              ${renderGroupSelectors(emissionGroups, currentEmission, "emission")}
             </div>
       `;
 
-      if (modelType === "glmhmmt") {
+      if (showTransitionRegressors) {
         html += `
             <div class="mm-section">
               <label class="mm-label">Transition Regressors</label>
-              ${renderRegressorTable(transitionGroups, currentTransition, "transition")}
+              ${renderGroupSelectors(transitionGroups, currentTransition, "transition")}
             </div>
         `;
       }
@@ -616,48 +404,21 @@ function render({ model, el }) {
 
       if (modelType !== "glm") {
         html += `
-        <div class="mm-section">
-          <label class="mm-label">Frozen Emission Weights</label>
-          ${renderFrozenTable(currentK, currentEmission, currentFrozen)}
-        </div>
-        `;
-      }
-
-      if (modelType !== "glm" && is2afc) {
-        html += `
-        <div class="mm-section">
-          <label class="mm-label">Cross-validation</label>
-          <div class="mm-flex-row">
-            <div class="mm-col half-col">
-              <label class="mm-label inline">Mode</label>
-              <select id="inp-cv-mode" class="mm-input small">
-                <option value="none" ${currentCvMode === "none" ? "selected" : ""}>none</option>
-                <option value="balanced_session_holdout" ${currentCvMode === "balanced_session_holdout" ? "selected" : ""}>balanced_session_holdout</option>
-              </select>
-            </div>
-            <div class="mm-col half-col">
-              <label class="mm-label inline">Repeats</label>
-              <input type="number" class="mm-num-input" id="inp-cv-repeats"
-                     min="1" step="1" value="${currentCvRepeats}"
-                     ${currentCvMode === "none" ? "disabled" : ""}>
-            </div>
+          <div class="mm-section">
+            <label class="mm-label">Frozen Emission Weights</label>
+            ${renderFrozenTable(currentK, currentEmission, currentFrozen)}
           </div>
-        </div>
         `;
       }
 
       html += `
-        <hr class="mm-divider"/>
-
         <div class="mm-flex-row">
           <div class="mm-col half-col">
             <div class="mm-section">
-              <label class="mm-label">Action Trace Half-life (τ)</label>
+              <label class="mm-label">Action Trace Half-life (tau)</label>
               <div class="mm-slider-wrap">
-                <input type="range" class="mm-range" id="inp-tau-range"
-                       min="1" max="200" value="${currentTau}" step="1">
-                <input type="number" class="mm-num-input" id="inp-tau-num"
-                       min="1" max="200" value="${currentTau}" step="1">
+                <input type="range" class="mm-range" id="inp-tau-range" min="1" max="200" step="1" value="${currentTau}">
+                <input type="number" class="mm-num-input" id="inp-tau-num" min="1" max="200" step="1" value="${currentTau}">
               </div>
             </div>
           </div>
@@ -668,11 +429,49 @@ function render({ model, el }) {
           <div class="mm-col half-col">
             <div class="mm-section">
               <label class="mm-label">Condition Filter</label>
-              <select id="inp-condition-filter" class="mm-input small">
-                ${conditionFilterOptions.map(opt => `
-                  <option value="${escapeHTML(opt)}" ${currentConditionFilter === opt ? "selected" : ""}>${escapeHTML(opt)}</option>
-                `).join("")}
+              <select id="inp-condition-filter" class="mm-input">
+                ${conditionFilterOptions
+                  .map(
+                    (option) => `
+                      <option value="${escapeHTML(option)}" ${currentConditionFilter === option ? "selected" : ""}>
+                        ${escapeHTML(option)}
+                      </option>
+                    `,
+                  )
+                  .join("")}
               </select>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `</div>`;
+
+      if (modelType !== "glm" && is2afc) {
+        html += `
+          <div class="mm-flex-row">
+            <div class="mm-col half-col">
+              <div class="mm-section">
+                <label class="mm-label">Cross-validation Mode</label>
+                <select id="inp-cv-mode" class="mm-input">
+                  <option value="none" ${currentCvMode === "none" ? "selected" : ""}>none</option>
+                  <option value="balanced_session_holdout" ${currentCvMode === "balanced_session_holdout" ? "selected" : ""}>balanced_session_holdout</option>
+                </select>
+              </div>
+            </div>
+            <div class="mm-col half-col">
+              <div class="mm-section">
+                <label class="mm-label">CV Repeats</label>
+                <input
+                  type="number"
+                  class="mm-num-input"
+                  id="inp-cv-repeats"
+                  min="1"
+                  step="1"
+                  value="${currentCvRepeats}"
+                  ${currentCvMode === "none" ? "disabled" : ""}
+                >
+              </div>
             </div>
           </div>
         `;
@@ -680,232 +479,190 @@ function render({ model, el }) {
 
       if (modelType === "glm") {
         html += `
-          <div class="mm-col">
-            <div class="mm-section row-align">
-              <div class="mm-col half-col">
-                <label class="mm-label inline">Lapse Mode</label>
-                <select id="inp-lapse-mode" class="mm-input small">
+          <div class="mm-flex-row">
+            <div class="mm-col half-col">
+              <div class="mm-section">
+                <label class="mm-label">Lapse Mode</label>
+                <select id="inp-lapse-mode" class="mm-input">
                   <option value="none" ${currentLapseMode === "none" ? "selected" : ""}>none</option>
                   <option value="class" ${currentLapseMode === "class" ? "selected" : ""}>class</option>
                   <option value="history" ${currentLapseMode === "history" ? "selected" : ""}>repeat/alternate (shared)</option>
                   <option value="history_conditioned" ${currentLapseMode === "history_conditioned" ? "selected" : ""}>repeat/alternate (conditioned)</option>
                 </select>
               </div>
-              <div class="mm-slider-wrap tight ${currentLapseMode === "none" ? "disabled" : ""}">
-                <span class="mm-label inline">Max Lapse:</span>
-                <input type="range" class="mm-range" id="inp-lapse-max-range"
-                       min="0.01" max="1.0" value="${currentLapseMax}" step="0.01"
-                       ${currentLapseMode === "none" ? "disabled" : ""}>
-                <input type="number" class="mm-num-input" id="inp-lapse-max-num"
-                       min="0.01" max="1.0" value="${currentLapseMax}" step="0.01"
-                       ${currentLapseMode === "none" ? "disabled" : ""}>
+            </div>
+            <div class="mm-col half-col">
+              <div class="mm-section">
+                <label class="mm-label">Max Lapse</label>
+                <div class="mm-slider-wrap ${currentLapseMode === "none" ? "disabled" : ""}">
+                  <input
+                    type="range"
+                    class="mm-range"
+                    id="inp-lapse-max-range"
+                    min="0.01"
+                    max="1.0"
+                    step="0.01"
+                    value="${currentLapseMax}"
+                    ${currentLapseMode === "none" ? "disabled" : ""}
+                  >
+                  <input
+                    type="number"
+                    class="mm-num-input"
+                    id="inp-lapse-max-num"
+                    min="0.01"
+                    max="1.0"
+                    step="0.01"
+                    value="${currentLapseMax}"
+                    ${currentLapseMode === "none" ? "disabled" : ""}
+                  >
+                </div>
               </div>
             </div>
           </div>
         `;
       }
+    }
 
-      html += `</div>`;  // end flex-row (tau/lapse)
-    } // end new fit block
-
-    // ── Footer (always visible) ─────────────────────────────────────────────
     html += `
-        <hr class="mm-divider"/>
-        <div class="mm-footer">
-          <div class="mm-alias-wrap">
-            <label class="mm-label inline">Custom Alias:</label>
-            <div class="mm-alias-controls">
-              <input type="text" id="inp-alias" class="mm-input ${(!aliasDirty && aliasError) ? "error" : ""}"
-                     placeholder="e.g. my_best_fit">
-              <button type="button" class="mm-btn-secondary" id="btn-save-alias" ${isRunning ? "disabled" : ""}>Save</button>
-            </div>
-            <div class="mm-alias-message ${aliasMessageClass}">${escapeHTML(aliasMessage)}</div>
+      <hr class="mm-divider">
+      <div class="mm-footer">
+        <div class="mm-alias-wrap">
+          <label class="mm-label inline">Custom Alias</label>
+          <div class="mm-alias-controls">
+            <input
+              type="text"
+              id="inp-alias"
+              class="mm-input ${aliasError ? "error" : ""}"
+              placeholder="e.g. my_best_fit"
+            >
+            <button type="button" class="mm-btn-secondary" id="btn-save-alias" ${isRunning ? "disabled" : ""}>Save</button>
           </div>
-          <button type="button" class="mm-btn-run" id="btn-run" ${isRunning ? "disabled" : ""}>
-            ${isRunning ? "FITTING..." : "RUN FIT"}
-          </button>
+          <div class="mm-alias-message ${aliasMessageClass}">${escapeHTML(aliasMessage)}</div>
         </div>
+        <button type="button" class="mm-btn-run" id="btn-run" ${isRunning ? "disabled" : ""}>
+          ${isRunning ? "FITTING..." : "RUN FIT"}
+        </button>
       </div>
     </div>
     `;
 
     el.innerHTML = html;
+
     const aliasInput = el.querySelector("#inp-alias");
     if (aliasInput) {
       aliasInput.value = aliasDraft;
     }
-    if (mode === "load" && loadTableState.activeFilterKey) {
-      const activeFilterInput = el.querySelector(`[data-filter-input="${loadTableState.activeFilterKey}"]`);
-      if (activeFilterInput) {
-        activeFilterInput.focus();
-        activeFilterInput.select();
+
+    const bind = (selector, eventName, handler) => {
+      const node = el.querySelector(selector);
+      if (node) {
+        node.addEventListener(eventName, handler);
       }
-    }
+    };
 
-    // ── Event wiring helpers ────────────────────────────────────────────────
-    const bind    = (sel, ev, fn) => { const n = el.querySelector(sel);    if (n) n.addEventListener(ev, fn); };
-    const bindAll = (sel, ev, fn) => { el.querySelectorAll(sel).forEach(n => n.addEventListener(ev, fn)); };
+    const bindAll = (selector, eventName, handler) => {
+      el.querySelectorAll(selector).forEach((node) => node.addEventListener(eventName, handler));
+    };
 
-    // Tabs
-    bindAll(".mm-tab", "click", (e) => {
-      model.set("ui_mode", e.target.dataset.mode);
-      model.save_changes();
+    bindAll(".mm-tab", "click", (event) => {
+      const modeValue = event.currentTarget.dataset.mode;
+      setTrait("ui_mode", modeValue);
     });
 
-    bindAll(".mm-sort-btn[data-sort-key]", "click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const key = e.currentTarget.dataset.sortKey;
-      if (!key) return;
-      if (loadTableState.sortKey === key) {
-        loadTableState.sortDir = loadTableState.sortDir === "asc" ? "desc" : "asc";
-      } else {
-        loadTableState.sortKey = key;
-        loadTableState.sortDir = "asc";
-      }
-      loadTableState.activeFilterKey = null;
-      updateUI();
-    });
-
-    bindAll(".mm-filter-btn[data-filter-key]", "click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const key = e.currentTarget.dataset.filterKey;
-      if (!key) return;
-      loadTableState.activeFilterKey = loadTableState.activeFilterKey === key ? null : key;
-      updateUI();
-    });
-
-    bindAll(".mm-filter-popover", "click", (e) => {
-      e.stopPropagation();
-    });
-
-    bindAll(".mm-filter-popover-btn[data-apply-filter]", "click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const key = e.currentTarget.dataset.applyFilter;
-      if (!key) return;
-      const input = el.querySelector(`[data-filter-input="${key}"]`);
-      const value = input ? input.value.trim() : "";
-      if (value) {
-        loadTableState.filters[key] = value;
-      } else {
-        delete loadTableState.filters[key];
-      }
-      loadTableState.activeFilterKey = null;
-      updateUI();
-    });
-
-    bindAll(".mm-filter-popover-btn[data-clear-filter]", "click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const key = e.currentTarget.dataset.clearFilter;
-      if (!key) return;
-      delete loadTableState.filters[key];
-      loadTableState.activeFilterKey = null;
-      updateUI();
-    });
-
-    bindAll(".mm-filter-input-popup[data-filter-input]", "keydown", (e) => {
-      const key = e.currentTarget.dataset.filterInput;
-      if (!key) return;
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const value = e.currentTarget.value.trim();
-        if (value) {
-          loadTableState.filters[key] = value;
-        } else {
-          delete loadTableState.filters[key];
-        }
-        loadTableState.activeFilterKey = null;
-        updateUI();
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        loadTableState.activeFilterKey = null;
-        updateUI();
-      }
-    });
-
-    // Load table row click — sets existing_model; Python observer does the heavy lifting
-    bindAll(".mm-tr", "click", (e) => {
-      if (e.target.closest(".mm-btn-delete-row")) return;
-      const row = e.target.closest(".mm-tr");
-      if (!row) return;
-      loadTableState.activeFilterKey = null;
-      el.querySelectorAll(".mm-tr").forEach(r => r.classList.remove("selected"));
-      row.classList.add("selected");
-      model.set("existing_model", row.dataset.model);
-      model.save_changes();
-    });
-
-    bindAll(".mm-btn-delete-row", "click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const name = e.target.dataset.deleteModel;
-      if (!name) return;
-      if (!window.confirm(`Delete model "${name}" and its folder?`)) return;
-      sendCommand("delete_model", { name });
-    });
-
-    // Select All toggle
     bind("#btn-select-all", "click", () => {
-      const list = model.get("subjects_list");
-      const cur  = model.get("subjects");
-      model.set("subjects", cur.length === list.length ? [] : [...list]);
-      model.save_changes();
+      const list = model.get("subjects_list") || [];
+      const current = model.get("subjects") || [];
+      setTrait("subjects", current.length === list.length ? [] : [...list]);
     });
 
-    // Subject chips
-    bindAll(".mm-chip[data-subject]", "click", (e) => {
-      const sub = e.target.closest("[data-subject]").dataset.subject;
-      let cur = [...model.get("subjects")];
-      cur = cur.includes(sub) ? cur.filter(x => x !== sub) : [...cur, sub];
-      model.set("subjects", cur);
-      model.save_changes();
+    bindAll("[data-subject]", "click", (event) => {
+      const subject = event.currentTarget.dataset.subject;
+      const current = new Set(model.get("subjects") || []);
+      if (current.has(subject)) {
+        current.delete(subject);
+      } else {
+        current.add(subject);
+      }
+      setTrait("subjects", [...current]);
     });
 
-    // Regressor table — individual cell click
-    const wireRegCell = (attr, trait) => {
-      bindAll(`.mm-reg-cell[data-${attr}]`, "click", (e) => {
-        const col = e.target.dataset[attr];
-        if (!col) return;
-        let cur = [...model.get(trait)];
-        cur = cur.includes(col) ? cur.filter(x => x !== col) : [...cur, col];
-        model.set(trait, cur);
-        model.save_changes();
+    bindAll("[data-emission]", "click", (event) => {
+      const value = event.currentTarget.dataset.emission;
+      toggleValues("emission_cols", [value]);
+    });
+
+    bindAll("[data-transition]", "click", (event) => {
+      const value = event.currentTarget.dataset.transition;
+      toggleValues("transition_cols", [value]);
+    });
+
+    bindAll("[data-emission-group]", "click", (event) => {
+      const raw = event.currentTarget.dataset.emissionMembers || "[]";
+      toggleValues("emission_cols", JSON.parse(raw));
+    });
+
+    bindAll("[data-transition-group]", "click", (event) => {
+      const raw = event.currentTarget.dataset.transitionMembers || "[]";
+      toggleValues("transition_cols", JSON.parse(raw));
+    });
+
+    bind("#inp-task", "change", (event) => {
+      setTrait("task", event.target.value);
+    });
+
+    const syncNumericPair = (rangeId, numberId, traitName, parseFn) => {
+      bind(`#${rangeId}`, "input", (event) => {
+        const value = parseFn(event.target.value);
+        const other = el.querySelector(`#${numberId}`);
+        if (other) {
+          other.value = String(value);
+        }
+        setTrait(traitName, value);
+      });
+
+      bind(`#${numberId}`, "change", (event) => {
+        const value = parseFn(event.target.value);
+        const other = el.querySelector(`#${rangeId}`);
+        if (other) {
+          other.value = String(value);
+        }
+        setTrait(traitName, value);
       });
     };
 
-    // Regressor table — row label click (toggle all members in group)
-    const wireRegRowLabel = (attr, trait) => {
-      bindAll(`.mm-reg-row-label[data-${attr}-group]`, "click", (e) => {
-        const lbl = e.target.closest(`[data-${attr}-group]`);
-        if (!lbl) return;
-        const members = JSON.parse(lbl.dataset[`${attr}Members`] || "[]");
-        if (!members.length) return;
-        let cur = new Set(model.get(trait));
-        const allIn = members.every(m => cur.has(m));
-        allIn ? members.forEach(m => cur.delete(m)) : members.forEach(m => cur.add(m));
-        model.set(trait, [...cur]);
-        model.save_changes();
-      });
-    };
+    syncNumericPair("inp-k-range", "inp-k-num", "K", (value) => parseInt(value, 10));
+    syncNumericPair("inp-tau-range", "inp-tau-num", "tau", (value) => parseInt(value, 10));
+    syncNumericPair("inp-lapse-max-range", "inp-lapse-max-num", "lapse_max", (value) => parseFloat(value));
 
-    wireRegCell("emission", "emission_cols");
-    wireRegRowLabel("emission", "emission_cols");
-    wireRegCell("transition", "transition_cols");
-    wireRegRowLabel("transition", "transition_cols");
+    bind("#inp-cv-mode", "change", (event) => {
+      setTrait("cv_mode", event.target.value);
+    });
+
+    bind("#inp-cv-repeats", "change", (event) => {
+      const value = parseInt(event.target.value, 10);
+      setTrait("cv_repeats", Number.isFinite(value) && value > 0 ? value : 1);
+    });
+
+    bind("#inp-condition-filter", "change", (event) => {
+      setTrait("condition_filter", event.target.value);
+    });
+
+    bind("#inp-lapse-mode", "change", (event) => {
+      setTrait("lapse_mode", event.target.value);
+    });
 
     const commitFreezeInput = (input) => {
-      if (!input) return;
+      if (!input) {
+        return;
+      }
       const state = input.dataset.state;
       const feature = input.dataset.feature;
-      if (state == null || !feature) return;
+      if (!state || !feature) {
+        return;
+      }
 
       const current = JSON.parse(JSON.stringify(model.get("frozen_emissions") || {}));
-      const rawValue = input.value.trim();
+      const rawValue = String(input.value || "").trim();
 
       if (!rawValue) {
         if (current[state]) {
@@ -917,104 +674,77 @@ function render({ model, el }) {
       } else {
         const parsed = parseFloat(rawValue);
         if (!Number.isFinite(parsed)) {
-          input.value = current[state] && Number.isFinite(current[state][feature]) ? String(current[state][feature]) : "";
           return;
         }
-        if (!current[state]) current[state] = {};
+        if (!current[state]) {
+          current[state] = {};
+        }
         current[state][feature] = parsed;
       }
 
-      model.set("frozen_emissions", current);
-      model.save_changes();
+      setTrait("frozen_emissions", current);
     };
 
-    bindAll(".mm-freeze-input", "change", (e) => {
-      commitFreezeInput(e.target);
-    });
-    bindAll(".mm-freeze-input", "keydown", (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      commitFreezeInput(e.target);
-      e.target.blur();
+    bindAll(".mm-freeze-input", "change", (event) => {
+      commitFreezeInput(event.target);
     });
 
-    // Task selector
-    bind("#inp-task", "change", (e) => {
-      model.set("task", e.target.value);
-      model.save_changes();
-    });
-
-    bind("#inp-cv-mode", "change", (e) => {
-      model.set("cv_mode", e.target.value);
-      model.save_changes();
-    });
-    bind("#inp-cv-repeats", "change", (e) => {
-      const val = parseInt(e.target.value, 10);
-      model.set("cv_repeats", Number.isFinite(val) && val > 0 ? val : 1);
-      model.save_changes();
-    });
-    bind("#inp-condition-filter", "change", (e) => {
-      model.set("condition_filter", e.target.value);
-      model.save_changes();
-    });
-
-    // Synchronized slider + number input pairs
-    const syncSlider = (rangeId, numId, trait, parseFn) => {
-      bind("#" + rangeId, "input", (e) => {
-        const val = parseFn(e.target.value);
-        const num = el.querySelector("#" + numId);
-        if (num) num.value = val;
-        model.set(trait, val);
-        model.save_changes();
-      });
-      bind("#" + numId, "change", (e) => {
-        const val = parseFn(e.target.value);
-        const rng = el.querySelector("#" + rangeId);
-        if (rng) rng.value = val;
-        model.set(trait, val);
-        model.save_changes();
-      });
-    };
-
-    syncSlider("inp-k-range",         "inp-k-num",         "K",         parseInt);
-    syncSlider("inp-tau-range",        "inp-tau-num",        "tau",       parseInt);
-    syncSlider("inp-lapse-max-range",  "inp-lapse-max-num",  "lapse_max", parseFloat);
-
-    bind("#inp-lapse-mode", "change", (e) => {
-      model.set("lapse_mode", e.target.value);
-      model.save_changes();
-    });
-
-    // Alias field + save button
-    const commitAlias = ({ saveClick = false } = {}) => {
-      aliasDirty = false;
-      if (saveClick) {
-        sendCommand("save_alias", { alias: aliasDraft });
+    bindAll(".mm-freeze-input", "keydown", (event) => {
+      if (event.key !== "Enter") {
         return;
       }
-      model.set("alias", aliasDraft);
-      model.save_changes();
-    };
+      event.preventDefault();
+      commitFreezeInput(event.target);
+      event.target.blur();
+    });
 
-    bind("#inp-alias", "input", (e) => {
-      aliasDraft = e.target.value;
+    bindAll("[data-model]", "click", (event) => {
+      if (event.target.closest(".mm-btn-delete-row")) {
+        return;
+      }
+      const modelId = event.currentTarget.dataset.model;
+      setTrait("existing_model", modelId);
+    });
+
+    bindAll(".mm-btn-delete-row", "click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const name = event.currentTarget.dataset.deleteModel;
+      if (!name) {
+        return;
+      }
+      if (!window.confirm(`Delete model "${name}" and its folder?`)) {
+        return;
+      }
+      sendCommand("delete_model", { name });
+    });
+
+    bind("#inp-alias", "input", (event) => {
+      aliasDraft = event.target.value;
       aliasDirty = true;
     });
-    bind("#inp-alias", "change", (e) => {
-      aliasDraft = e.target.value;
-      commitAlias();
-    });
-    bind("#inp-alias", "keydown", (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      aliasDraft = e.target.value;
-      commitAlias({ saveClick: true });
-    });
-    bind("#btn-save-alias", "click", () => {
-      commitAlias({ saveClick: true });
+
+    bind("#inp-alias", "change", (event) => {
+      aliasDraft = event.target.value;
+      aliasDirty = false;
+      setTrait("alias", aliasDraft);
     });
 
-    // Run button
+    bind("#inp-alias", "keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      aliasDraft = event.target.value;
+      aliasDirty = false;
+      sendCommand("save_alias", { alias: aliasDraft });
+    });
+
+    bind("#btn-save-alias", "click", () => {
+      aliasDirty = false;
+      sendCommand("save_alias", { alias: aliasDraft });
+    });
+
     bind("#btn-run", "click", () => {
       if (model.get("is_running")) {
         return;
@@ -1023,52 +753,11 @@ function render({ model, el }) {
     });
   };
 
-  updateUI();
-  document.addEventListener("click", closeFilterPopover, true);
-
-  const rerenderTraits = [
-    "existing_model",
-    "is_2afc",
-    "is_running",
-    "model_type",
-    "task",
-    "task_options",
-    "task_discovery_message",
-    "ui_mode",
-    "k_options",
-    "K",
-    "subjects_list",
-    "subjects",
-    "emission_cols",
-    "transition_cols",
-    "frozen_emissions",
-    "tau",
-    "cv_mode",
-    "cv_repeats",
-    "show_condition_filter",
-    "condition_filter_options",
-    "condition_filter",
-    "lapse_mode",
-    "lapse_max",
-    "alias",
-    "alias_error",
-    "alias_status",
-    "saved_model_name",
-    "existing_models_info",
-    "emission_groups",
-    "transition_groups",
-  ];
-
-  rerenderTraits.forEach((trait) => {
-    model.on(`change:${trait}`, scheduleUpdate);
-  });
+  renderUI();
+  model.on("change", renderUI);
 
   return () => {
-    isDisposed = true;
-    rerenderTraits.forEach((trait) => {
-      model.off(`change:${trait}`, scheduleUpdate);
-    });
-    document.removeEventListener("click", closeFilterPopover, true);
+    model.off("change", renderUI);
   };
 }
 
