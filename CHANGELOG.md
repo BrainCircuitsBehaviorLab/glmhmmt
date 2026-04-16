@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.1.13
+- Fixed bugs in the model manager widget.
+
+
+## 0.1.13
 - Added by subject parametrization.
 
 ## 0.1.12

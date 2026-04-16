@@ -106,7 +106,7 @@ function getLoadTableColumns(showTransitionRegressors) {
       renderCell: (info) => (
         info.id === "__default__"
           ? ""
-          : `<button class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
+          : `<button type="button" class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
       ),
     }
   );
@@ -318,7 +318,7 @@ function renderRegressorTable(groups, selectedCols, dataAttr) {
       const col = members[side];
       if (!col) return `<td class="mm-reg-cell mm-reg-empty"></td>`;
       const active = sel.has(col) ? "selected" : "";
-      return `<td class="mm-reg-cell ${active}" data-${dataAttr}="${col}">${col}</td>`;
+      return `<td class="mm-reg-cell ${active}" data-${dataAttr}="${escapeHTML(col)}">${escapeHTML(col)}</td>`;
     };
 
     // N/C column: prefer C (sided neutral) over N (global)
@@ -327,9 +327,9 @@ function renderRegressorTable(groups, selectedCols, dataAttr) {
     rows += `
       <tr class="mm-reg-row ${rowClass}">
         <td class="mm-reg-row-label ${rowClass}"
-            data-${dataAttr}-group="${group.key}"
+            data-${dataAttr}-group="${escapeHTML(group.key)}"
             data-${dataAttr}-members='${membersJSON}'
-        >${group.label}</td>
+        >${escapeHTML(group.label)}</td>
         ${cellFor("L")}${ncCell}${cellFor("R")}
       </tr>`;
   }
@@ -357,7 +357,7 @@ function renderSelectAll(subjectsList, currentSubjects) {
   const someSel = currentSubjects.length > 0 && currentSubjects.length < subjectsList.length;
   const cls     = allSel ? "selected" : someSel ? "partial" : "";
   const label   = allSel ? "Deselect All" : "Select All";
-  return `<button class="mm-select-all ${cls}" id="btn-select-all">${label}</button>`;
+  return `<button type="button" class="mm-select-all ${cls}" id="btn-select-all">${label}</button>`;
 }
 
 function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
@@ -369,8 +369,8 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
   const head = selectedFeatures
     .map(
       (feature) => `
-        <th class="mm-freeze-th" title="${feature}">
-          <span class="mm-freeze-head-text">${feature}</span>
+        <th class="mm-freeze-th" title="${escapeHTML(feature)}">
+          <span class="mm-freeze-head-text">${escapeHTML(feature)}</span>
         </th>
       `
     )
@@ -389,8 +389,8 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
               type="number"
               step="any"
               class="mm-freeze-input"
-              data-state="${stateKey}"
-              data-feature="${feature}"
+              data-state="${escapeHTML(stateKey)}"
+              data-feature="${escapeHTML(feature)}"
               value="${display}"
               placeholder="free"
             >
@@ -428,11 +428,38 @@ function render({ model, el }) {
   const containerId = "mm-" + Math.random().toString(36).substring(7);
   let aliasDraft = model.get("alias") || "";
   let aliasDirty = false;
+  let scheduled = false;
+  let isDisposed = false;
   const loadTableState = {
     sortKey: "name",
     sortDir: "asc",
     filters: {},
     activeFilterKey: null,
+  };
+
+  const scheduleUpdate = () => {
+    if (scheduled || isDisposed) {
+      return;
+    }
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      if (!isDisposed) {
+        updateUI();
+      }
+    });
+  };
+
+  const closeFilterPopover = (event) => {
+    if (loadTableState.activeFilterKey == null) {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof Node && el.contains(target)) {
+      return;
+    }
+    loadTableState.activeFilterKey = null;
+    updateUI();
   };
 
   const updateUI = () => {
@@ -487,7 +514,7 @@ function render({ model, el }) {
               <select id="inp-task" class="mm-input small">
                 ${taskOptions.length
                   ? taskOptions.map(opt => `
-                  <option value="${opt.value}" ${currentTask === opt.value ? "selected" : ""}>${opt.label}</option>
+                  <option value="${escapeHTML(opt.value)}" ${currentTask === opt.value ? "selected" : ""}>${escapeHTML(opt.label)}</option>
                 `).join("")
                   : '<option value="" selected>No adapters found</option>'}
               </select>
@@ -495,12 +522,12 @@ function render({ model, el }) {
           </div>
         ${taskOptions.length ? `
         <div class="mm-tabs">
-          <button class="mm-tab ${mode === 'new'  ? 'active' : ''}" data-mode="new">New Fit</button>
-          <button class="mm-tab ${mode === 'load' ? 'active' : ''}" data-mode="load">Load Existing</button>
+          <button type="button" class="mm-tab ${mode === 'new'  ? 'active' : ''}" data-mode="new">New Fit</button>
+          <button type="button" class="mm-tab ${mode === 'load' ? 'active' : ''}" data-mode="load">Load Existing</button>
         </div>
         <div class="mm-content">` : `
         <div class="mm-content">
-          <div class="mm-empty-note">${taskDiscoveryMessage || "No task adapters were found in the configured adapter folders."}</div>
+          <div class="mm-empty-note">${escapeHTML(taskDiscoveryMessage || "No task adapters were found in the configured adapter folders.")}</div>
         `} 
     `;
 
@@ -534,7 +561,7 @@ function render({ model, el }) {
               <div class="mm-chip-container subjects-grid">
                 ${subjectsList.map(s => `
                   <div class="mm-chip ${currentSubjects.includes(s) ? "selected" : ""}"
-                       data-subject="${s}">${s}</div>
+                       data-subject="${escapeHTML(s)}">${escapeHTML(s)}</div>
                 `).join("")}
               </div>
             </div>
@@ -636,7 +663,7 @@ function render({ model, el }) {
               <label class="mm-label">Condition Filter</label>
               <select id="inp-condition-filter" class="mm-input small">
                 ${conditionFilterOptions.map(opt => `
-                  <option value="${opt}" ${currentConditionFilter === opt ? "selected" : ""}>${opt}</option>
+                  <option value="${escapeHTML(opt)}" ${currentConditionFilter === opt ? "selected" : ""}>${escapeHTML(opt)}</option>
                 `).join("")}
               </select>
             </div>
@@ -683,11 +710,11 @@ function render({ model, el }) {
             <div class="mm-alias-controls">
               <input type="text" id="inp-alias" class="mm-input ${(!aliasDirty && aliasError) ? "error" : ""}"
                      placeholder="e.g. my_best_fit">
-              <button class="mm-btn-secondary" id="btn-save-alias" ${isRunning ? "disabled" : ""}>Save</button>
+              <button type="button" class="mm-btn-secondary" id="btn-save-alias" ${isRunning ? "disabled" : ""}>Save</button>
             </div>
-            <div class="mm-alias-message ${aliasMessageClass}">${aliasMessage}</div>
+            <div class="mm-alias-message ${aliasMessageClass}">${escapeHTML(aliasMessage)}</div>
           </div>
-          <button class="mm-btn-run" id="btn-run" ${isRunning ? "disabled" : ""}>
+          <button type="button" class="mm-btn-run" id="btn-run" ${isRunning ? "disabled" : ""}>
             ${isRunning ? "FITTING..." : "RUN FIT"}
           </button>
         </div>
@@ -851,8 +878,6 @@ function render({ model, el }) {
       bindAll(`.mm-reg-row-label[data-${attr}-group]`, "click", (e) => {
         const lbl = e.target.closest(`[data-${attr}-group]`);
         if (!lbl) return;
-        // camelCase: data-emission-members → dataset.emissionMembers
-        const key     = attr.charAt(0).toUpperCase() + attr.slice(1);
         const members = JSON.parse(lbl.dataset[`${attr}Members`] || "[]");
         if (!members.length) return;
         let cur = new Set(model.get(trait));
@@ -957,12 +982,12 @@ function render({ model, el }) {
 
     // Alias field + save button
     const commitAlias = ({ saveClick = false } = {}) => {
+      aliasDirty = false;
       model.set("alias", aliasDraft);
       if (saveClick) {
         model.set("save_alias_clicks", model.get("save_alias_clicks") + 1);
       }
       model.save_changes();
-      aliasDirty = false;
     };
 
     bind("#inp-alias", "input", (e) => {
@@ -994,7 +1019,52 @@ function render({ model, el }) {
   };
 
   updateUI();
-  model.on("change", updateUI);
+  document.addEventListener("click", closeFilterPopover, true);
+
+  const rerenderTraits = [
+    "existing_model",
+    "is_2afc",
+    "is_running",
+    "model_type",
+    "task",
+    "task_options",
+    "task_discovery_message",
+    "ui_mode",
+    "k_options",
+    "K",
+    "subjects_list",
+    "subjects",
+    "emission_cols",
+    "transition_cols",
+    "frozen_emissions",
+    "tau",
+    "cv_mode",
+    "cv_repeats",
+    "show_condition_filter",
+    "condition_filter_options",
+    "condition_filter",
+    "lapse_mode",
+    "lapse_max",
+    "alias",
+    "alias_error",
+    "alias_status",
+    "saved_model_name",
+    "existing_models_info",
+    "emission_groups",
+    "transition_groups",
+  ];
+
+  rerenderTraits.forEach((trait) => {
+    model.on(`change:${trait}`, scheduleUpdate);
+  });
+
+  return () => {
+    isDisposed = true;
+    rerenderTraits.forEach((trait) => {
+      model.off(`change:${trait}`, scheduleUpdate);
+    });
+    document.removeEventListener("click", closeFilterPopover, true);
+  };
 }
 
 export default { render };

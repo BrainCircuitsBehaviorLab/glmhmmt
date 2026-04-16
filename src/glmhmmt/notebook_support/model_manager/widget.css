@@ -5,6 +5,8 @@
 
 /* ── Host / container ───────────────────────────────────────────────────── */
 :host {
+    display: block;
+    box-sizing: border-box;
     --brand-main:  #003660;
     --brand-light: #004b87;
     --brand-dark:  #002240;
