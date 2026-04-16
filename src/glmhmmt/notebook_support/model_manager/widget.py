@@ -30,10 +30,6 @@ from glmhmmt.tasks import get_adapter, get_task_options
 _ASSET_DIR = Path(__file__).parent
 
 
-def _read_asset(name: str) -> str:
-    return (_ASSET_DIR / name).read_text(encoding="utf-8")
-
-
 def _paths():
     return get_runtime_paths()
 
@@ -75,7 +71,7 @@ _2AFC_EMISSION_GROUPS: list[dict] = [
     {"key": "wsls",          "label": "WSLS",            "members": {"N": "wsls"}},
 ]
 
-_BINARY_TASK_KEYS = {"2AFC", "2AFC_DRUG", "NUO_AUDITORY"}
+_BINARY_TASK_KEYS = {"2AFC", "2AFC_DELAY", "2AFC_DRUG", "NUO_AUDITORY"}
 _CONDITION_FILTER_TASKS = {"2AFC_DRUG"}
 _CONDITION_FILTER_OPTIONS = ["all", "saline", "drug"]
 
@@ -225,6 +221,77 @@ def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
     return result
 
 
+def _build_mcdr_emission_groups(available_cols: list[str]) -> list[dict]:
+    """Build the MCDR selector groups, including dynamic lag/session families."""
+    available = set(available_cols)
+    result: list[dict] = []
+    registered: set[str] = set()
+
+    def add_group(group: dict) -> None:
+        filtered = {k: v for k, v in group["members"].items() if v in available}
+        if not filtered:
+            return
+        result.append({**group, "members": filtered})
+        registered.update(filtered.values())
+
+    def add_hidden_family(*, key: str, label: str, family_cols: list[str]) -> None:
+        if not family_cols:
+            return
+        result.append(
+            {
+                "key": key,
+                "label": label,
+                "members": {},
+                "toggle_members": family_cols,
+                "hide_members": True,
+            }
+        )
+        registered.update(family_cols)
+
+    bias_hot_cols = sorted(
+        [
+            col
+            for col in available_cols
+            if col.startswith("bias_") and col.removeprefix("bias_").isdigit()
+        ],
+        key=lambda col: _numeric_suffix(col, "bias_"),
+    )
+    choice_lag_rows: dict[str, dict[str, str]] = {}
+    for col in available_cols:
+        match = re.fullmatch(r"choice_lag_(\d+)([LCR])", col)
+        if match is None:
+            continue
+        lag_key = match.group(1)
+        side = match.group(2)
+        choice_lag_rows.setdefault(lag_key, {})[side] = col
+
+    for group in _MCDR_EMISSION_GROUPS:
+        add_group(group)
+        if group["key"] == "bias":
+            add_hidden_family(
+                key="bias_hot",
+                label="bias_hot",
+                family_cols=bias_hot_cols,
+            )
+        if group["key"] == "A":
+            for lag_key in sorted(choice_lag_rows, key=int):
+                members = choice_lag_rows[lag_key]
+                result.append(
+                    {
+                        "key": f"choice_lag_{lag_key}",
+                        "label": f"choice lag {int(lag_key)}",
+                        "members": {side: members[side] for side in ("L", "C", "R") if side in members},
+                    }
+                )
+                registered.update(members.values())
+
+    for col in available_cols:
+        if col not in registered:
+            result.append({"key": col, "label": col, "members": {"N": col}})
+
+    return result
+
+
 def _count_fitted_subjects(model_dir: Path) -> int:
     """Count unique subjects from *_arrays.npz files in *model_dir*.
 
@@ -285,6 +352,8 @@ def _summarize_selected_regressors(selected_cols: list[str], groups: list[dict])
 def _format_emission_regressor_summary(task: str, emission_cols: list[str]) -> str:
     if task in _BINARY_TASK_KEYS:
         groups = _build_2afc_emission_groups(emission_cols)
+    elif task == "MCDR":
+        groups = _build_mcdr_emission_groups(emission_cols)
     else:
         groups = _build_regressor_groups(emission_cols, _MCDR_EMISSION_GROUPS)
     return ", ".join(_summarize_selected_regressors(emission_cols, groups))
@@ -349,8 +418,8 @@ class model_cfg:
 # ── Widget ────────────────────────────────────────────────────────────────────
 
 class ModelManagerWidget(anywidget.AnyWidget):
-    _esm = _read_asset("widget.js")
-    _css = _read_asset("widget.css")
+    _esm = _ASSET_DIR / "widget.js"
+    _css = _ASSET_DIR / "widget.css"
 
     # ── traitlets ─────────────────────────────────────────────────────────────
     ui_mode    = traitlets.Unicode("new").tag(sync=True)      # "new" | "load"
@@ -763,18 +832,16 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     def _refresh_groups(self) -> None:
         """Rebuild emission_groups / transition_groups from current *_options traits."""
-        if self.task.upper() == "2AFC":
+        if self.task.upper() in _BINARY_TASK_KEYS:
             self.emission_groups = _build_2afc_emission_groups(self.emission_cols_options)
             self.transition_groups = []
             return
-        if self.task.upper() in _BINARY_TASK_KEYS:
-            e_reg = _2AFC_EMISSION_GROUPS
-            t_reg: list[dict] = []
-        else:
-            e_reg = _MCDR_EMISSION_GROUPS
-            t_reg = _MCDR_TRANSITION_GROUPS
-        self.emission_groups   = _build_regressor_groups(self.emission_cols_options, e_reg)
-        self.transition_groups = _build_regressor_groups(self.transition_cols_options, t_reg)
+        if self.task.upper() == "MCDR":
+            self.emission_groups = _build_mcdr_emission_groups(self.emission_cols_options)
+            self.transition_groups = _build_regressor_groups(self.transition_cols_options, _MCDR_TRANSITION_GROUPS)
+            return
+        self.emission_groups = _build_regressor_groups(self.emission_cols_options, _MCDR_EMISSION_GROUPS)
+        self.transition_groups = _build_regressor_groups(self.transition_cols_options, _MCDR_TRANSITION_GROUPS)
 
     def _clear_adapter_state(self) -> None:
         self.is_2afc = False

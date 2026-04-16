@@ -24,7 +24,7 @@ def fit_subject(
     num_classes: int = 3,
     task: str = "MCDR",
     lapse_mode: str = "none",
-    lapse_max: float = 0.2,
+    lapse_max: float = 1.0,
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
     seed: int = 0,

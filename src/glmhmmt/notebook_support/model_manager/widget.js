@@ -184,47 +184,62 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
   `;
 }
 
-function renderLoadList(existingInfo, existingVal, showTransitionRegressors) {
+function renderLoadTable(existingInfo, existingVal, showTransitionRegressors) {
   const rows = existingInfo || [];
   if (!rows.length) {
     return '<p class="mm-empty-note">No saved models were found.</p>';
   }
 
   return `
-    <div class="mm-load-list">
-      ${rows
-        .map((info) => {
-          const selected = info.id === existingVal ? "selected" : "";
-          const isDefault = info.id === "__default__";
-          return `
-            <div class="mm-load-card ${selected}" data-model="${escapeHTML(info.id)}">
-              <div class="mm-load-main">
-                <div class="mm-load-name">
-                  ${escapeHTML(info.name)}
-                  ${isDefault ? '<span class="mm-default-badge">default</span>' : ""}
-                </div>
-                <div class="mm-load-meta">
-                  <span>${escapeHTML(info.subjects)} subjects</span>
-                  <span>K ${escapeHTML(info.K)}</span>
-                  <span>tau ${escapeHTML(info.tau)}</span>
-                  <span>${escapeHTML(info.cv || "none")}</span>
-                </div>
-                <div class="mm-load-detail"><strong>Emission:</strong> ${escapeHTML(info.regressors || "")}</div>
-                ${
-                  showTransitionRegressors
-                    ? `<div class="mm-load-detail"><strong>Transition:</strong> ${escapeHTML(info.transition_regressors || "")}</div>`
-                    : ""
-                }
-              </div>
-              ${
-                isDefault
-                  ? ""
-                  : `<button type="button" class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
-              }
-            </div>
-          `;
-        })
-        .join("")}
+    <div class="mm-table-container">
+      <table class="mm-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Subjects</th>
+            <th>K</th>
+            <th>Tau</th>
+            <th>CV</th>
+            <th>Emission Regressors</th>
+            ${showTransitionRegressors ? "<th>Transition Regressors</th>" : ""}
+            <th class="mm-actions-cell">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map((info) => {
+              const selected = info.id === existingVal ? "selected" : "";
+              const isDefault = info.id === "__default__";
+              const rowClass = `mm-tr ${selected} ${isDefault ? "mm-tr-default" : ""}`.trim();
+              return `
+                <tr class="${rowClass}" data-model="${escapeHTML(info.id)}">
+                  <td>
+                    ${escapeHTML(info.name)}
+                    ${isDefault ? '<span class="mm-default-badge">default</span>' : ""}
+                  </td>
+                  <td>${escapeHTML(info.subjects)}</td>
+                  <td>${escapeHTML(info.K)}</td>
+                  <td>${escapeHTML(info.tau)}</td>
+                  <td>${escapeHTML(info.cv || "none")}</td>
+                  <td class="mm-wrap">${escapeHTML(info.regressors || "")}</td>
+                  ${
+                    showTransitionRegressors
+                      ? `<td class="mm-wrap">${escapeHTML(info.transition_regressors || "")}</td>`
+                      : ""
+                  }
+                  <td class="mm-actions-cell">
+                    ${
+                      isDefault
+                        ? ""
+                        : `<button type="button" class="mm-btn-delete-row" data-delete-model="${escapeHTML(info.id)}">Delete</button>`
+                    }
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
     </div>
   `;
 }
@@ -336,7 +351,7 @@ function render({ model, el }) {
       html += `
         <div class="mm-section">
           <label class="mm-label">Saved Models</label>
-          ${renderLoadList(existingInfo, existingVal, showTransitionRegressors)}
+          ${renderLoadTable(existingInfo, existingVal, showTransitionRegressors)}
         </div>
       `;
     } else {
@@ -411,9 +426,42 @@ function render({ model, el }) {
         `;
       }
 
-      html += `
-        <div class="mm-flex-row">
-          <div class="mm-col half-col">
+      if (showConditionFilter) {
+        html += `
+          <div class="mm-flex-row">
+            <div class="mm-col half-col">
+              <!--
+              <div class="mm-section">
+                <label class="mm-label">Action Trace Half-life (tau)</label>
+                <div class="mm-slider-wrap">
+                  <input type="range" class="mm-range" id="inp-tau-range" min="1" max="200" step="1" value="${currentTau}">
+                  <input type="number" class="mm-num-input" id="inp-tau-num" min="1" max="200" step="1" value="${currentTau}">
+                </div>
+              </div>
+              -->
+            </div>
+            <div class="mm-col half-col">
+              <div class="mm-section">
+                <label class="mm-label">Condition Filter</label>
+                <select id="inp-condition-filter" class="mm-input">
+                  ${conditionFilterOptions
+                    .map(
+                      (option) => `
+                        <option value="${escapeHTML(option)}" ${currentConditionFilter === option ? "selected" : ""}>
+                          ${escapeHTML(option)}
+                        </option>
+                      `,
+                    )
+                    .join("")}
+                </select>
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        html += `
+          <!--
+          <div class="mm-flex-row">
             <div class="mm-section">
               <label class="mm-label">Action Trace Half-life (tau)</label>
               <div class="mm-slider-wrap">
@@ -422,30 +470,9 @@ function render({ model, el }) {
               </div>
             </div>
           </div>
-      `;
-
-      if (showConditionFilter) {
-        html += `
-          <div class="mm-col half-col">
-            <div class="mm-section">
-              <label class="mm-label">Condition Filter</label>
-              <select id="inp-condition-filter" class="mm-input">
-                ${conditionFilterOptions
-                  .map(
-                    (option) => `
-                      <option value="${escapeHTML(option)}" ${currentConditionFilter === option ? "selected" : ""}>
-                        ${escapeHTML(option)}
-                      </option>
-                    `,
-                  )
-                  .join("")}
-              </select>
-            </div>
-          </div>
+          -->
         `;
       }
-
-      html += `</div>`;
 
       if (modelType !== "glm" && is2afc) {
         html += `
@@ -491,6 +518,7 @@ function render({ model, el }) {
                 </select>
               </div>
             </div>
+            <!--
             <div class="mm-col half-col">
               <div class="mm-section">
                 <label class="mm-label">Max Lapse</label>
@@ -518,6 +546,7 @@ function render({ model, el }) {
                 </div>
               </div>
             </div>
+            -->
           </div>
         `;
       }
@@ -631,8 +660,8 @@ function render({ model, el }) {
     };
 
     syncNumericPair("inp-k-range", "inp-k-num", "K", (value) => parseInt(value, 10));
-    syncNumericPair("inp-tau-range", "inp-tau-num", "tau", (value) => parseInt(value, 10));
-    syncNumericPair("inp-lapse-max-range", "inp-lapse-max-num", "lapse_max", (value) => parseFloat(value));
+    // syncNumericPair("inp-tau-range", "inp-tau-num", "tau", (value) => parseInt(value, 10));
+    // syncNumericPair("inp-lapse-max-range", "inp-lapse-max-num", "lapse_max", (value) => parseFloat(value));
 
     bind("#inp-cv-mode", "change", (event) => {
       setTrait("cv_mode", event.target.value);

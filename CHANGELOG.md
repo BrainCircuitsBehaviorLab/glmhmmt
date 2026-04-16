@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.1.15
+## 0.1.17
+- Switched the model-manager anywidget assets from in-memory JS/CSS strings to file-backed assets so marimo no longer serves them through ephemeral virtual-file shared-memory blobs.
+- Kept the simplified load-existing table and server-owned selection lifecycle, so stop/rerun and task/model switches stay backend-driven.
+- Added regression tests covering the file-backed asset configuration and the load-selection lifecycle across task and model-type refreshes.
+- Extended `2AFC_delay` to build the same grouped one-hot regressor families used by `2AFC`, including session-bias and explicit choice-lag columns.
+- Added session-bias one-hot regressors and per-choice lag regressors to `MCDR`, and taught its adapter metadata to expose those dynamic families consistently.
+- Updated the model-manager widget to treat `2AFC_delay` like the other binary tasks for grouped regressor selection, and added grouped handling for the new dynamic `MCDR` families.
+- Commented out the widget `tau` selector and `max_lapse` control so they no longer appear in the current UI.
+- Added regression tests covering the new `2AFC_delay` and `MCDR` regressor families plus the `2AFC_delay` widget grouping behavior.
+
+## 0.1.16
 - Switched model-manager actions to the same explicit JS-to-Python command channel used by the stable toml editor widget, avoiding direct JS click-counter mutations for save, delete, and run actions.
 - Added command-handler regression tests for save, delete, and run-fit flows.
 

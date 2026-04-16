@@ -21,7 +21,12 @@ import numpy as np
 import polars as pl
 from glmhmmt.tasks import TaskAdapter
 
-from glmhmmt.views import SubjectFitView, _LABEL_RANK
+from glmhmmt.views import SubjectFitView, _LABEL_RANK, get_state_color
+
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -290,6 +295,341 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
     if not records:
         return pl.DataFrame()
     return pl.DataFrame(records)
+
+
+def _default_state_labels(K: int, C: int = 2) -> list[str]:
+    if K == 1:
+        return ["State 0"]
+    if K == 2:
+        return ["Disengaged", "Engaged"]
+    if K == 3:
+        return ["Engaged", "Biased L", "Biased R"]
+    return [f"State {k}" for k in range(K)]
+
+
+def _resolve_state_colors(
+    state_labels: list[str],
+    state_colors,
+) -> list[str]:
+    if state_colors is not None:
+        if isinstance(state_colors, str) or np.isscalar(state_colors):
+            return [str(state_colors)] * len(state_labels)
+        colors = [str(color) for color in state_colors]
+        if len(colors) == 1 and len(state_labels) > 1:
+            colors *= len(state_labels)
+        if len(colors) != len(state_labels):
+            raise ValueError(
+                f"state_colors must have length {len(state_labels)}, got {len(colors)}."
+            )
+        return colors
+    return [
+        get_state_color(label, idx, K=len(state_labels) or None)
+        for idx, label in enumerate(state_labels)
+    ]
+
+
+def _weights_boxplot_payload_from_array(
+    weights,
+    feature_names=None,
+    state_labels=None,
+    state_colors=None,
+) -> dict:
+    W = np.asarray(weights, dtype=float)
+    if W.ndim == 2:
+        W = W[None, :, None, :]
+    elif W.ndim == 3:
+        W = W[:, :, None, :]
+    if W.ndim != 4:
+        raise ValueError(
+            "weights must have shape (N, K, C-1, M), (N, K, M), or (K, M)."
+        )
+
+    _, K, C_m1, M = W.shape
+    labels = (
+        [str(label) for label in state_labels]
+        if state_labels is not None
+        else _default_state_labels(K, C_m1 + 1)
+    )
+    if len(labels) != K:
+        raise ValueError(f"state_labels must have length {K}, got {len(labels)}.")
+
+    features = (
+        [str(name) for name in feature_names]
+        if feature_names is not None
+        else [f"Feature {idx}" for idx in range(M)]
+    )
+    if len(features) != M:
+        raise ValueError(f"feature_names must have length {M}, got {len(features)}.")
+
+    colors = _resolve_state_colors(labels, state_colors)
+    W_avg = np.nanmean(W, axis=2)
+    values_by_state_feature = [
+        [
+            np.asarray(W_avg[:, state_idx, feat_idx], dtype=float)
+            for feat_idx in range(M)
+        ]
+        for state_idx in range(K)
+    ]
+    subject_lines = [
+        np.asarray(W_avg[:, :, feat_idx], dtype=float)
+        for feat_idx in range(M)
+    ]
+    return {
+        "values_by_state_feature": values_by_state_feature,
+        "feature_names": features,
+        "state_labels": labels,
+        "state_colors": colors,
+        "subject_lines": subject_lines,
+    }
+
+
+def _weights_boxplot_payload_from_frame(
+    weights_df,
+    feature_names=None,
+    state_labels=None,
+    state_colors=None,
+) -> dict:
+    if isinstance(weights_df, pl.DataFrame):
+        df = weights_df.clone()
+    elif pd is not None and isinstance(weights_df, pd.DataFrame):
+        df = pl.from_pandas(weights_df)
+    else:
+        raise TypeError("weights_df must be a Polars or pandas DataFrame.")
+
+    if df.is_empty():
+        return {
+            "values_by_state_feature": [],
+            "feature_names": [],
+            "state_labels": [],
+            "state_colors": [],
+            "subject_lines": [],
+        }
+
+    if "class_idx" in df.columns:
+        df = df.filter(pl.col("class_idx") == 0)
+    if df.is_empty():
+        return {
+            "values_by_state_feature": [],
+            "feature_names": [],
+            "state_labels": [],
+            "state_colors": [],
+            "subject_lines": [],
+        }
+
+    required = {"feature", "weight"}
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(
+            "weights dataframe must contain at least 'feature' and 'weight'. "
+            f"Missing: {missing}."
+        )
+
+    df = df.with_columns(
+        pl.col("feature").cast(pl.Utf8).alias("feature"),
+        pl.col("weight").cast(pl.Float64, strict=False).alias("weight"),
+    ).drop_nulls("weight")
+    if df.is_empty():
+        return {
+            "values_by_state_feature": [],
+            "feature_names": [],
+            "state_labels": [],
+            "state_colors": [],
+            "subject_lines": [],
+        }
+
+    if "subject" not in df.columns:
+        df = df.with_columns(pl.lit("subject-0").alias("subject"))
+    else:
+        df = df.with_columns(pl.col("subject").cast(pl.Utf8).alias("subject"))
+
+    if "state_label" not in df.columns:
+        df = df.with_columns(pl.lit("State 0").alias("state_label"))
+    else:
+        df = df.with_columns(pl.col("state_label").cast(pl.Utf8).alias("state_label"))
+
+    if "state_rank" not in df.columns:
+        if "state_idx" in df.columns:
+            fallback = (
+                df.select(pl.col("state_idx").cast(pl.Int64, strict=False))
+                .to_series()
+                .fill_null(0)
+                .to_list()
+            )
+        else:
+            fallback = [0] * df.height
+        labels = df["state_label"].to_list()
+        ranks = [
+            int(_LABEL_RANK.get(label, fallback_idx))
+            for label, fallback_idx in zip(labels, fallback, strict=False)
+        ]
+        df = df.with_columns(pl.Series("state_rank", ranks, dtype=pl.Int64))
+
+    if feature_names is None:
+        features = df["feature"].unique(maintain_order=True).to_list()
+    else:
+        requested = [str(name) for name in feature_names]
+        present = set(df["feature"].unique().to_list())
+        features = [name for name in requested if name in present]
+        features.extend(
+            name
+            for name in df["feature"].unique(maintain_order=True).to_list()
+            if name not in features
+        )
+
+    state_meta = (
+        df.select(["state_rank", "state_label"])
+        .unique(maintain_order=True)
+        .sort(["state_rank", "state_label"])
+    )
+    available_labels = state_meta["state_label"].to_list()
+    if state_labels is None:
+        labels = available_labels
+    else:
+        requested_labels = [str(label) for label in state_labels]
+        labels = [label for label in requested_labels if label in set(available_labels)]
+        labels.extend(label for label in available_labels if label not in labels)
+
+    colors = _resolve_state_colors(labels, state_colors)
+
+    values_by_state_feature: list[list[np.ndarray]] = []
+    for state_name in labels:
+        state_df = df.filter(pl.col("state_label") == state_name)
+        feature_values = []
+        for feature_name in features:
+            vals = (
+                state_df.filter(pl.col("feature") == feature_name)["weight"]
+                .to_numpy()
+                .astype(float, copy=False)
+            )
+            feature_values.append(vals)
+        values_by_state_feature.append(feature_values)
+
+    feature_frames = [df.filter(pl.col("feature") == feature_name) for feature_name in features]
+    subject_lines: list[np.ndarray] = []
+    for feat_df in feature_frames:
+        if feat_df.is_empty():
+            subject_lines.append(np.empty((0, len(labels)), dtype=float))
+            continue
+        subjects = feat_df["subject"].unique(maintain_order=True).to_list()
+        per_subject = np.full((len(subjects), len(labels)), np.nan, dtype=float)
+        for subj_idx, subject in enumerate(subjects):
+            subj_df = feat_df.filter(pl.col("subject") == subject)
+            for state_idx, label in enumerate(labels):
+                state_df = subj_df.filter(pl.col("state_label") == label)
+                if state_df.is_empty():
+                    continue
+                per_subject[subj_idx, state_idx] = float(np.mean(state_df["weight"].to_numpy()))
+        subject_lines.append(per_subject)
+
+    return {
+        "values_by_state_feature": values_by_state_feature,
+        "feature_names": features,
+        "state_labels": labels,
+        "state_colors": colors,
+        "subject_lines": subject_lines,
+    }
+
+
+def build_weights_boxplot_payload(
+    weights,
+    feature_names=None,
+    state_labels=None,
+    state_colors=None,
+) -> dict:
+    if isinstance(weights, pl.DataFrame) or (pd is not None and isinstance(weights, pd.DataFrame)):
+        return _weights_boxplot_payload_from_frame(
+            weights,
+            feature_names=feature_names,
+            state_labels=state_labels,
+            state_colors=state_colors,
+        )
+    return _weights_boxplot_payload_from_array(
+        weights,
+        feature_names=feature_names,
+        state_labels=state_labels,
+        state_colors=state_colors,
+    )
+
+
+def _resolve_transition_matrix_from_arrays(
+    arrays_store: dict,
+    subject: str,
+) -> np.ndarray | None:
+    arr = arrays_store.get(subject, {})
+    if "transition_matrix" in arr:
+        return np.asarray(arr["transition_matrix"], dtype=float)
+    if "transition_bias" in arr:
+        bias = np.asarray(arr["transition_bias"], dtype=float)
+        exp_bias = np.exp(bias - bias.max(axis=-1, keepdims=True))
+        return exp_bias / exp_bias.sum(axis=-1, keepdims=True)
+    return None
+
+
+def build_transition_matrix_payload(
+    arrays_store: dict,
+    state_labels: dict,
+    K: int,
+    subjects: list,
+) -> dict:
+    selected = [
+        subject
+        for subject in subjects
+        if _resolve_transition_matrix_from_arrays(arrays_store, subject) is not None
+    ]
+    if not selected:
+        return {
+            "matrix": np.asarray([], dtype=float),
+            "tick_labels": [],
+            "title": "No transition matrices found.",
+        }
+
+    mean_matrix = np.mean(
+        [
+            _resolve_transition_matrix_from_arrays(arrays_store, subject)
+            for subject in selected
+        ],
+        axis=0,
+    )
+    label_map = state_labels.get(selected[0], {k: f"S{k}" for k in range(K)})
+    tick_labels = [str(label_map.get(k, f"S{k}")) for k in range(K)]
+    return {
+        "matrix": mean_matrix,
+        "tick_labels": tick_labels,
+        "title": f"Mean transition matrix  (n={len(selected)} subjects)",
+    }
+
+
+def build_transition_matrix_by_subject_payload(
+    arrays_store: dict,
+    state_labels: dict,
+    K: int,
+    subjects: list,
+) -> dict:
+    selected = [
+        subject
+        for subject in subjects
+        if _resolve_transition_matrix_from_arrays(arrays_store, subject) is not None
+    ]
+    if not selected:
+        return {
+            "matrices": [],
+            "subject_ids": [],
+            "tick_labels_by_subject": [],
+        }
+
+    matrices = [
+        _resolve_transition_matrix_from_arrays(arrays_store, subject)
+        for subject in selected
+    ]
+    tick_labels_by_subject = [
+        [str(state_labels.get(subject, {}).get(k, f"S{k}")) for k in range(K)]
+        for subject in selected
+    ]
+    return {
+        "matrices": matrices,
+        "subject_ids": selected,
+        "tick_labels_by_subject": tick_labels_by_subject,
+    }
 
 
 def build_posterior_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
