@@ -650,6 +650,28 @@ class SoftmaxGLMHMM(HMM):
     def inputs_shape(self) -> Tuple[int, ...]:
         return (self.inputs_dim,)
 
+    def _validate_emissions(self, emissions, *, allow_padding: bool, name: str = "emissions") -> np.ndarray:
+        """Validate categorical emission labels before entering JIT-compiled code."""
+        emissions_np = np.asarray(emissions, dtype=int).reshape(-1)
+        if emissions_np.size == 0:
+            return emissions_np
+
+        min_valid = 0
+        max_valid = self.num_classes if allow_padding else (self.num_classes - 1)
+        invalid_mask = (emissions_np < min_valid) | (emissions_np > max_valid)
+        if np.any(invalid_mask):
+            invalid_values = sorted({int(v) for v in emissions_np[invalid_mask].tolist()})
+            allowed = (
+                f"0..{self.num_classes} (with {self.num_classes} reserved as padding)"
+                if allow_padding
+                else f"0..{self.num_classes - 1}"
+            )
+            raise ValueError(
+                f"{name} must contain categorical class indices in {allowed}; "
+                f"found invalid values {invalid_values}."
+            )
+        return emissions_np
+
     def initialize(
         self,
         key: Array = jr.PRNGKey(0),
@@ -897,6 +919,7 @@ class SoftmaxGLMHMM(HMM):
         """
         from tqdm.auto import trange
 
+        self._validate_emissions(emissions, allow_padding=False, name="emissions")
         sessions = self._split_by_session(emissions, inputs, session_ids)
         e_pad, i_pad, _ = self._pad_sessions(sessions)
         m_step_state = self.initialize_m_step_state(params, props)
@@ -932,6 +955,7 @@ class SoftmaxGLMHMM(HMM):
             Float array of shape `(T_total, K)` with smoothed state
             probabilities.
         """
+        self._validate_emissions(emissions, allow_padding=False, name="emissions")
         sessions = self._split_by_session(emissions, inputs, session_ids)
         e_pad, i_pad, lengths = self._pad_sessions(sessions)
         posterior_batch = self._batched_smoother_jit(params, e_pad, i_pad)

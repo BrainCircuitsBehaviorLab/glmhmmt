@@ -15,6 +15,7 @@ def two_afc_delay_module(monkeypatch):
     monkeypatch.syspath_prepend(str(workspace_root / "NMDAR_paper"))
     module = importlib.import_module("src.process.two_afc_delay")
     monkeypatch.setattr(module, "_max_subject_sessions", lambda: 3)
+    monkeypatch.setattr(module, "_all_delay_levels", lambda: (0.0, 1.0, 2.0, 3.0))
     return module
 
 
@@ -63,3 +64,48 @@ def test_two_afc_delay_build_feature_df_adds_session_bias_delay_hot_choice_lags_
     assert "bias_0" in available_cols
     assert "delay_3" in available_cols
     assert "choice_lag_15" in available_cols
+
+
+def test_two_afc_delay_build_feature_df_uses_task_wide_delay_columns(two_afc_delay_module):
+    adapter = two_afc_delay_module.TwoAFCDelayAdapter()
+    df_a = pl.DataFrame(
+        {
+            "subject": ["mouse-1"] * 2,
+            "drug": ["Rest"] * 2,
+            "session": ["sess_a", "sess_a"],
+            "trial": [1, 2],
+            "stim": [2.0, -4.0],
+            "choices": [-1.0, 1.0],
+            "hit": [0.0, 1.0],
+            "delays": [0.0, 1.0],
+            "after_correct": [0.0, 1.0],
+            "repeat": [0.0, 1.0],
+            "repeat_choice_side": [0.0, 1.0],
+            "WM": [0.0, 1.0],
+            "RL": [1.0, 0.0],
+        }
+    )
+    df_b = pl.DataFrame(
+        {
+            "subject": ["mouse-2"] * 2,
+            "drug": ["Rest"] * 2,
+            "session": ["sess_b", "sess_b"],
+            "trial": [1, 2],
+            "stim": [0.0, 8.0],
+            "choices": [1.0, -1.0],
+            "hit": [1.0, 0.0],
+            "delays": [2.0, 3.0],
+            "after_correct": [0.0, 1.0],
+            "repeat": [1.0, 0.0],
+            "repeat_choice_side": [1.0, 0.0],
+            "WM": [0.0, 1.0],
+            "RL": [1.0, 0.0],
+        }
+    )
+
+    feature_a = adapter.build_feature_df(df_a)
+    feature_b = adapter.build_feature_df(df_b)
+
+    assert feature_a.columns == feature_b.columns
+    np.testing.assert_array_equal(feature_a["delay_2"].to_numpy(), np.zeros(2, dtype=np.float32))
+    np.testing.assert_array_equal(feature_b["delay_0"].to_numpy(), np.zeros(2, dtype=np.float32))

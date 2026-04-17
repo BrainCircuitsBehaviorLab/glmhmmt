@@ -17,6 +17,8 @@ only for accuracy analyses — not for posterior visualisation.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import polars as pl
 from glmhmmt.tasks import TaskAdapter
@@ -27,6 +29,10 @@ try:
     import pandas as pd
 except Exception:  # pragma: no cover
     pd = None
+
+
+_BIAS_FAMILY_PATTERN = re.compile(r"^bias_\d+$")
+_BIAS_FAMILY_LABEL = "|bias|"
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -437,6 +443,38 @@ def _weights_boxplot_payload_from_frame(
             "subject_lines": [],
         }
 
+    feature_name_order = (
+        [str(name) for name in feature_names]
+        if feature_names is not None
+        else df["feature"].unique(maintain_order=True).to_list()
+    )
+    normalized_feature_names: list[str] = []
+    for feature_name in feature_name_order:
+        normalized_name = (
+            _BIAS_FAMILY_LABEL
+            if _BIAS_FAMILY_PATTERN.match(feature_name)
+            else feature_name
+        )
+        if normalized_name not in normalized_feature_names:
+            normalized_feature_names.append(normalized_name)
+
+    if any(_BIAS_FAMILY_PATTERN.match(name) for name in df["feature"].unique().to_list()):
+        group_cols = [col for col in df.columns if col not in {"feature", "weight"}]
+        df = (
+            df.with_columns(
+                pl.when(pl.col("feature").str.contains(r"^bias_\d+$"))
+                .then(pl.lit(_BIAS_FAMILY_LABEL))
+                .otherwise(pl.col("feature"))
+                .alias("feature"),
+                pl.when(pl.col("feature").str.contains(r"^bias_\d+$"))
+                .then(pl.col("weight").abs())
+                .otherwise(pl.col("weight"))
+                .alias("weight"),
+            )
+            .group_by([*group_cols, "feature"], maintain_order=True)
+            .agg(pl.col("weight").mean().alias("weight"))
+        )
+
     if "subject" not in df.columns:
         df = df.with_columns(pl.lit("subject-0").alias("subject"))
     else:
@@ -467,7 +505,7 @@ def _weights_boxplot_payload_from_frame(
     if feature_names is None:
         features = df["feature"].unique(maintain_order=True).to_list()
     else:
-        requested = [str(name) for name in feature_names]
+        requested = normalized_feature_names
         present = set(df["feature"].unique().to_list())
         features = [name for name in requested if name in present]
         features.extend(

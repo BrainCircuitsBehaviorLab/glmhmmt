@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.19
+- Added choice-lag tau fitting and export support, including the new `glmhmmt-fit-choice-lag-tau` CLI, subject-level summary tables, and saved summary plots for GLM fits with `choice_lag_*` regressors.
+- Validated categorical emission labels before entering the JIT-backed EM and smoothing paths, so invalid class indices now fail fast with clear `ValueError` messages instead of surfacing as harder-to-debug downstream errors.
+- Added a reusable single-family custom boxplot helper, collapsed summary `bias_*` coefficients into per-subject `|bias|` absolute means for boxplot payloads, and kept one-hot family plotting aligned with the project boxplot style.
+- Hardened notebook selector compatibility with a fallback `build_selector_groups` path and extended `2AFC_delay` regression coverage to ensure task-wide delay one-hot columns remain stable across subjects.
+- Added regression tests covering choice-lag tau export, emission-label validation, custom feature boxplots, summary bias-family collapsing, and task-wide `2AFC_delay` delay columns.
+
 ## 0.1.18
 - Replaced the raw `2AFC_delay` stimulus one-hot family with `delay_hot`, and added `bias_param`, `delay_param`, and `choice_lag_param` columns to the `2AFC_delay` and `MCDR` task adapters.
 - Collapsed the `MCDR` `stim1..4{L,C,R}` family under a single hidden `stim_hot` widget row and exposed the pooled `stim_param` plus `choice_lag_param` scalar rows alongside the grouped raw families.

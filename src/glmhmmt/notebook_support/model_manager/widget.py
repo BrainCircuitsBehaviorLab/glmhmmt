@@ -24,7 +24,24 @@ from glmhmmt.notebook_support.analysis_common import (
     remote_fits_enabled,
 )
 from glmhmmt.runtime import get_runtime_paths
-from glmhmmt.tasks import build_selector_groups, get_adapter, get_task_options
+from glmhmmt.tasks import get_adapter, get_task_options
+
+try:
+    from glmhmmt.tasks import build_selector_groups
+except ImportError:
+    def build_selector_groups(available_cols: list[str], registry: list[dict]) -> list[dict]:
+        available = set(available_cols)
+        registered: set[str] = set()
+        result: list[dict] = []
+        for group in registry:
+            filtered = {k: v for k, v in group["members"].items() if v in available}
+            if filtered:
+                result.append({**group, "members": filtered})
+                registered.update(filtered.values())
+        for col in available_cols:
+            if col not in registered:
+                result.append({"key": col, "label": col, "members": {"N": col}})
+        return result
 
 
 _ASSET_DIR = Path(__file__).parent

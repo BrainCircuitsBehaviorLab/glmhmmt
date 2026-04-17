@@ -221,6 +221,71 @@ def _significance_label(pvalue: float) -> str:
     return "ns"
 
 
+def plot_feature_boxplot(
+    values_by_feature,
+    feature_names: Sequence[str],
+    *,
+    subject_lines=None,
+    figsize: tuple[float, float] | None = None,
+    title: str = "Feature weights",
+    xlabel: str = "",
+    ylabel: str = "Weight",
+    median_color: str = "#1f77b4",
+    subject_line_color: str = "#7A7A7A",
+    subject_line_alpha: float = 0.15,
+    subject_line_width: float = 1.0,
+    box_width: float = 0.72,
+) -> plt.Figure:
+    features = [str(name) for name in feature_names]
+    if not features:
+        return _empty_plot()
+
+    grouped_values = [np.asarray(vals, dtype=float) for vals in values_by_feature]
+    if len(grouped_values) != len(features):
+        raise ValueError(
+            "values_by_feature must have one entry per feature. "
+            f"Expected {len(features)}, got {len(grouped_values)}."
+        )
+
+    resolved_subject_lines = None
+    if subject_lines is not None:
+        resolved_subject_lines = np.asarray(subject_lines, dtype=float)
+        if resolved_subject_lines.ndim == 1:
+            resolved_subject_lines = resolved_subject_lines[None, :]
+        if resolved_subject_lines.shape[1] != len(features):
+            raise ValueError(
+                "subject_lines must have one column per feature. "
+                f"Expected {len(features)}, got {resolved_subject_lines.shape[1]}."
+            )
+
+    positions = np.arange(len(features), dtype=float)
+    fig, ax = plt.subplots(
+        figsize=figsize or (max(5.0, 0.9 * len(features)), 4.0)
+    )
+    custom_boxplot(
+        ax,
+        grouped_values,
+        positions=positions,
+        widths=box_width,
+        median_colors=median_color,
+        line_values=resolved_subject_lines,
+        line_color=subject_line_color,
+        line_alpha=subject_line_alpha,
+        line_linewidth=subject_line_width,
+        showfliers=False,
+        showcaps=False,
+    )
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.6)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xticks(positions)
+    ax.set_xticklabels(features)
+    sns.despine(ax=ax)
+    fig.tight_layout()
+    return fig
+
+
 def plot_weights_boxplot(
     values_by_state_feature,
     feature_names: Sequence[str],
@@ -472,6 +537,7 @@ def plot_transition_matrix_by_subject(
 
 __all__ = [
     "custom_boxplot",
+    "plot_feature_boxplot",
     "plot_transition_matrix",
     "plot_transition_matrix_by_subject",
     "plot_weights_boxplot",
