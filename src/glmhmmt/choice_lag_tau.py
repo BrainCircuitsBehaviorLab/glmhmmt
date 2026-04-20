@@ -275,6 +275,7 @@ def _save_choice_lag_summary_plot(
     fit_task: str,
     fit_model_kind: str,
     fit_model_id: str,
+    median_tau_decay: float | None = None,
 ) -> list[Path]:
     if not records:
         return []
@@ -292,7 +293,6 @@ def _save_choice_lag_summary_plot(
         sharey=True,
     )
     axes_flat = axes.ravel()
-    empirical_color = "#374151"
     fitted_color = "#2563eb"
     mean_empirical_color = "#111827"
     mean_fitted_color = "#dc2626"
@@ -309,7 +309,6 @@ def _save_choice_lag_summary_plot(
         predicted_stack = np.full((len(group_records), len(lag_grid)), np.nan, dtype=float)
         for row_idx, record in enumerate(group_records):
             x = record.lags.astype(float)
-            display_weights = _plot_display_weights(fit_task=fit_task, values=record.weights)
             display_predicted = _plot_display_weights(fit_task=fit_task, values=record.predicted_weights)
             # ax.plot(x, display_weights, color=empirical_color, alpha=0.15, linewidth=1.0)
             # ax.scatter(x, display_weights, color=empirical_color, alpha=0.15, s=12)
@@ -350,6 +349,9 @@ def _save_choice_lag_summary_plot(
         if group == groups[0]:
             ax.set_ylabel("Weight")
         ax.legend(frameon=False, loc="best")
+
+    if median_tau_decay is not None and np.isfinite(median_tau_decay):
+        fig.suptitle(f"Median tau across animals: {median_tau_decay:.3g}", y=1.03)
     fig.tight_layout()
 
     plot_dir = _plot_dir(
@@ -487,10 +489,20 @@ def export_choice_lag_tau_table(
         table.write_csv(target)
     else:
         table.write_parquet(target)
+
+    median_tau_decay: float | None = None
+    if rows:
+        tau_values = np.asarray([row.get("tau_decay", np.nan) for row in rows], dtype=float)
+        success_values = np.asarray([bool(row.get("success", False)) for row in rows], dtype=bool)
+        valid = np.isfinite(tau_values) & success_values
+        if np.any(valid):
+            median_tau_decay = float(np.median(tau_values[valid]))
+
     _save_choice_lag_summary_plot(
         records=plot_records,
         fit_task=fit_task,
         fit_model_kind=fit_model_kind,
         fit_model_id=fit_model_id,
+        median_tau_decay=median_tau_decay,
     )
     return table

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.20
+- Updated the model-manager widget to honor each task adapter's full `default_emission_cols(...)` list for GLM fits instead of truncating the preselected emission regressors to the first 10 columns.
+- Added regression coverage for the full-default widget path so task-owned custom emission defaults remain stable across widget refreshes.
+
 ## 0.1.19
 - Added choice-lag tau fitting and export support, including the new `glmhmmt-fit-choice-lag-tau` CLI, subject-level summary tables, and saved summary plots for GLM fits with `choice_lag_*` regressors.
 - Validated categorical emission labels before entering the JIT-backed EM and smoothing paths, so invalid class indices now fail fast with clear `ValueError` messages instead of surfacing as harder-to-debug downstream errors.

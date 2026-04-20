@@ -1,4 +1,5 @@
 import json
+import polars as pl
 from glmhmmt.notebook_support.model_manager import widget as widget_module
 
 
@@ -167,3 +168,54 @@ def test_model_type_change_clears_stale_existing_model_selection(monkeypatch, tm
 
     assert widget.existing_models == ["__default__"]
     assert widget.existing_model == ""
+
+
+def test_update_options_keeps_full_glm_default_regressor_list(monkeypatch, tmp_path):
+    class FakeAdapter:
+        num_classes = 2
+
+        def read_dataset(self):
+            return pl.DataFrame({"subject": ["s1", "s2"]})
+
+        def subject_filter(self, df):
+            return df
+
+        def available_emission_cols(self, df):
+            del df
+            return [f"reg_{idx}" for idx in range(12)]
+
+        def default_emission_cols(self, df):
+            del df
+            return [f"reg_{idx}" for idx in range(12)]
+
+        def default_transition_cols(self):
+            return ["trans_0"]
+
+        def available_transition_cols(self):
+            return ["trans_0"]
+
+        def build_emission_groups(self, available_cols):
+            return [{"key": col, "label": col, "members": {"N": col}} for col in available_cols]
+
+        def build_transition_groups(self, available_cols):
+            return [{"key": col, "label": col, "members": {"N": col}} for col in available_cols]
+
+    monkeypatch.setattr(widget_module, "get_task_options", lambda: [{"label": "Fake", "value": "FAKE"}])
+    monkeypatch.setattr(widget_module, "get_adapter", lambda task: FakeAdapter())
+    monkeypatch.setattr(
+        widget_module.ModelManagerWidget,
+        "_build_model_info_list",
+        lambda self, fits_path, default_info: (["__default__"], [default_info]),
+    )
+    monkeypatch.setattr(widget_module.ModelManagerWidget, "_fits_path", lambda self: tmp_path)
+
+    widget = widget_module.ModelManagerWidget()
+    widget.task = "FAKE"
+    widget.model_type = "glm"
+    widget.emission_cols = []
+    widget.transition_cols = []
+
+    widget._update_options()
+
+    assert widget.emission_cols == [f"reg_{idx}" for idx in range(12)]
+    assert widget.existing_models_info[0]["regressors"] == ", ".join(f"reg_{idx}" for idx in range(12))

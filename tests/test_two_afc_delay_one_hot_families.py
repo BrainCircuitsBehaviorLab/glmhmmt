@@ -109,3 +109,47 @@ def test_two_afc_delay_build_feature_df_uses_task_wide_delay_columns(two_afc_del
     assert feature_a.columns == feature_b.columns
     np.testing.assert_array_equal(feature_a["delay_2"].to_numpy(), np.zeros(2, dtype=np.float32))
     np.testing.assert_array_equal(feature_b["delay_0"].to_numpy(), np.zeros(2, dtype=np.float32))
+
+
+def test_two_afc_delay_default_emission_cols_expand_delay_stim_x_delay_and_choice_lag_families(two_afc_delay_module):
+    adapter = two_afc_delay_module.TwoAFCDelayAdapter()
+    df_sub = pl.DataFrame(
+        {
+            "subject": ["mouse-1"] * 4,
+            "drug": ["Rest"] * 4,
+            "session": ["sess_a", "sess_a", "sess_b", "sess_b"],
+            "trial": [1, 2, 1, 2],
+            "stim": [2.0, -4.0, 0.0, 8.0],
+            "choices": [-1.0, 1.0, 1.0, -1.0],
+            "hit": [0.0, 1.0, 1.0, 0.0],
+            "delays": [0.0, 1.0, 2.0, 3.0],
+            "after_correct": [0.0, 1.0, 0.0, 1.0],
+            "repeat": [0.0, 1.0, 1.0, 0.0],
+            "repeat_choice_side": [0.0, 1.0, 1.0, 0.0],
+            "WM": [0.0, 1.0, 0.0, 1.0],
+            "RL": [1.0, 0.0, 1.0, 0.0],
+        }
+    )
+
+    feature_df = adapter.build_feature_df(df_sub)
+    default_cols = adapter.default_emission_cols(feature_df)
+
+    assert adapter.stim_x_delay_hot_cols(feature_df) == [
+        "stim_x_delay_hot_0",
+        "stim_x_delay_hot_1",
+        "stim_x_delay_hot_2",
+        "stim_x_delay_hot_3",
+    ]
+    assert default_cols == [
+        "bias",
+        "stim",
+        "delay_0",
+        "delay_1",
+        "delay_2",
+        "delay_3",
+        "stim_x_delay_hot_0",
+        "stim_x_delay_hot_1",
+        "stim_x_delay_hot_2",
+        "stim_x_delay_hot_3",
+        *[f"choice_lag_{lag_idx:02d}" for lag_idx in range(1, 16)],
+    ]

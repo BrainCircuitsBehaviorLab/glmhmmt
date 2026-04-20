@@ -429,7 +429,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
             available_ecols = adapter.available_emission_cols(df_all)
             default_ecols = adapter.default_emission_cols(df_all)
             self.emission_cols_options = available_ecols
-            self.emission_cols = default_ecols[:10] if self.model_type == "glm" else default_ecols
+            self.emission_cols = list(default_ecols)
             self.transition_cols_options = adapter.available_transition_cols()
             self.transition_cols = adapter.default_transition_cols()
             self.frozen_emissions = {}
@@ -744,14 +744,14 @@ class ModelManagerWidget(anywidget.AnyWidget):
             default_ecols = adapter.default_emission_cols(df_all)
             self.emission_cols_options = available_ecols
             if not self.emission_cols:
-                self.emission_cols = default_ecols[:10] if self.model_type == "glm" else default_ecols
+                self.emission_cols = list(default_ecols)
 
             tcols = adapter.default_transition_cols()
             self.transition_cols_options = adapter.available_transition_cols()
             if not self.transition_cols:
                 self.transition_cols = tcols
 
-            default_ecols = default_ecols[:10] if self.model_type == "glm" else default_ecols
+            default_ecols = list(default_ecols)
             default_info = {
                 "id":         "__default__",
                 "name":       "Default",

@@ -59,3 +59,33 @@ def test_two_afc_build_feature_df_adds_session_bias_and_choice_lags(two_afc_modu
     assert "at_choice_param" in available_cols
     assert "bias_0" in available_cols
     assert "choice_lag_15" in available_cols
+
+
+def test_two_afc_default_emission_cols_expand_bias_stim_and_choice_lag_families(two_afc_module):
+    adapter = two_afc_module.TwoAFCAdapter()
+    df_sub = pl.DataFrame(
+        {
+            "subject": ["mouse-1"] * 4,
+            "Experiment": ["2AFC_2"] * 4,
+            "Session": ["sess_a", "sess_a", "sess_b", "sess_b"],
+            "Trial": [1, 2, 1, 2],
+            "ILD": [2, -4, 0, 8],
+            "Choice": [0, 1, 1, 0],
+            "Hit": [0, 1, 1, 0],
+            "Punish": [1, 0, 0, 1],
+            "Side": [0, 1, 1, 0],
+        }
+    )
+
+    feature_df = adapter.build_feature_df(df_sub)
+    default_cols = adapter.default_emission_cols(feature_df)
+
+    assert default_cols == [
+        "bias_0",
+        "bias_1",
+        "bias_2",
+        "stim_2",
+        "stim_4",
+        "stim_8",
+        *[f"choice_lag_{lag_idx:02d}" for lag_idx in range(1, 16)],
+    ]
