@@ -18,9 +18,8 @@ def test_binary_emission_summary_boxplot_accepts_weights_df_and_feature_labels()
     )
 
     fig = plot_binary_emission_weights_summary_boxplot(
-        {},
-        2,
-        weights_df=weights_df,
+        weights_df,
+        K=2,
         weight_sign=-1.0,
         feature_order=("bias", "stim_vals"),
         abs_features=("bias",),

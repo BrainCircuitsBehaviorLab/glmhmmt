@@ -701,3 +701,269 @@ def build_posterior_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
     if not frames:
         return pl.DataFrame()
     return pl.concat(frames)
+
+
+def _as_pandas_df(df_like, *, name: str):
+    if pd is not None and isinstance(df_like, pd.DataFrame):
+        return df_like.copy()
+    if isinstance(df_like, pl.DataFrame):
+        return df_like.to_pandas()
+    raise TypeError(f"{name} must be a Polars or pandas DataFrame.")
+
+
+def _posterior_cols(df) -> list[str]:
+    cols = [
+        col for col in df.columns
+        if isinstance(col, str) and col.startswith("p_state_") and col.removeprefix("p_state_").isdigit()
+    ]
+    return sorted(cols, key=lambda col: int(col.rsplit("_", 1)[1]))
+
+
+def _require_columns(df, required: list[str], *, name: str) -> None:
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"{name} is missing required columns: {missing}.")
+
+
+def _state_meta_from_trial_df(df) -> tuple[list[str], dict[int, str], dict[int, int]]:
+    _require_columns(df, ["state_idx", "state_label"], name="trial_df")
+    meta = (
+        df[["state_idx", "state_label", *([ "state_rank" ] if "state_rank" in df.columns else [])]]
+        .dropna(subset=["state_idx", "state_label"])
+        .drop_duplicates()
+    )
+    label_by_idx = {
+        int(row.state_idx): str(row.state_label)
+        for row in meta.itertuples(index=False)
+    }
+    if "state_rank" in meta.columns:
+        rank_by_idx = {
+            int(row.state_idx): int(row.state_rank)
+            for row in meta.itertuples(index=False)
+        }
+    else:
+        rank_by_idx = {idx: idx for idx in label_by_idx}
+    state_order = [
+        label_by_idx[idx]
+        for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
+    ]
+    return state_order, label_by_idx, rank_by_idx
+
+
+def build_state_accuracy_payload(
+    trial_df,
+    *,
+    performance_col: str = "correct_bool",
+    chance_level: float | None = None,
+    title: str = "Accuracy by state",
+) -> dict:
+    """Prepare the payload consumed by ``plot_state_accuracy``."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", "state_label", performance_col], name="trial_df")
+    state_order, _, _ = _state_meta_from_trial_df(df)
+    work = df.dropna(subset=["subject", "state_label", performance_col]).copy()
+    work[performance_col] = work[performance_col].astype(float)
+    accuracy_df = (
+        work.groupby(["subject", "state_label"], observed=True)
+        .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
+        .reset_index()
+    )
+    return {
+        "accuracy_df": accuracy_df,
+        "state_order": state_order,
+        "chance_level": chance_level,
+        "title": title,
+    }
+
+
+def build_session_trajectories_payload(
+    trial_df,
+    *,
+    session_col: str = "session",
+    sort_col: str = "trial_idx",
+    title: str = "Session trajectories",
+) -> dict:
+    """Prepare long posterior trajectories averaged over sessions."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", session_col, sort_col], name="trial_df")
+    pcols = _posterior_cols(df)
+    if not pcols:
+        raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    work = df.sort_values(["subject", session_col, sort_col]).copy()
+    work["trial_in_session"] = work.groupby(["subject", session_col], observed=True).cumcount()
+    long = work.melt(
+        id_vars=["subject", session_col, "trial_in_session"],
+        value_vars=pcols,
+        var_name="state_col",
+        value_name="probability",
+    )
+    long["state_idx"] = long["state_col"].str.rsplit("_", n=1).str[-1].astype(int)
+    long["state_label"] = long["state_idx"].map(label_by_idx).fillna(long["state_col"])
+    long["state_rank"] = long["state_idx"].map(rank_by_idx).fillna(long["state_idx"]).astype(int)
+    long = long.rename(columns={session_col: "session"})
+    trajectory_df = (
+        long.groupby(["subject", "session", "trial_in_session", "state_idx", "state_label", "state_rank"], observed=True)
+        .agg(probability=("probability", "mean"))
+        .reset_index()
+    )
+    return {
+        "trajectory_df": trajectory_df,
+        "state_order": state_order,
+        "title": title,
+    }
+
+
+def build_state_occupancy_payload(
+    trial_df,
+    *,
+    session_col: str = "session",
+    sort_col: str = "trial_idx",
+    title: str = "State occupancy",
+) -> dict:
+    """Prepare occupancy and MAP-switch summaries."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
+    state_order, _, _ = _state_meta_from_trial_df(df)
+    work = df.sort_values(["subject", session_col, sort_col]).copy()
+
+    subj_totals = work.groupby("subject", observed=True).size().rename("n_total")
+    occupancy_df = (
+        work.groupby(["subject", "state_label"], observed=True)
+        .size()
+        .rename("n_trials")
+        .reset_index()
+        .merge(subj_totals.reset_index(), on="subject", how="left")
+    )
+    occupancy_df["occupancy"] = occupancy_df["n_trials"] / occupancy_df["n_total"]
+
+    session_totals = work.groupby(["subject", session_col], observed=True).size().rename("n_total")
+    session_occupancy_df = (
+        work.groupby(["subject", session_col, "state_label"], observed=True)
+        .size()
+        .rename("n_trials")
+        .reset_index()
+        .merge(session_totals.reset_index(), on=["subject", session_col], how="left")
+    )
+    session_occupancy_df["occupancy"] = session_occupancy_df["n_trials"] / session_occupancy_df["n_total"]
+    session_occupancy_df = session_occupancy_df.rename(columns={session_col: "session"})
+
+    state_source = "state_idx" if "state_idx" in work.columns else "state_label"
+    switches = []
+    for (subject, session), group in work.groupby(["subject", session_col], observed=True):
+        values = group[state_source].to_numpy()
+        n_switches = int((values[1:] != values[:-1]).sum()) if len(values) > 1 else 0
+        switches.append({"subject": subject, "session": session, "n_switches": n_switches})
+    switches_df = pd.DataFrame(switches)
+    return {
+        "occupancy_df": occupancy_df,
+        "session_occupancy_df": session_occupancy_df,
+        "switches_df": switches_df,
+        "state_order": state_order,
+        "title": title,
+    }
+
+
+def build_state_dwell_times_payload(
+    trial_df,
+    *,
+    session_col: str = "session",
+    sort_col: str = "trial_idx",
+    title: str = "Dwell times",
+) -> dict:
+    """Prepare empirical MAP-state dwell lengths split at session boundaries."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
+    state_order, _, _ = _state_meta_from_trial_df(df)
+    work = df.sort_values(["subject", session_col, sort_col]).copy()
+    rows = []
+    state_source = "state_idx" if "state_idx" in work.columns else "state_label"
+    for (subject, session), group in work.groupby(["subject", session_col], observed=True):
+        values = group[state_source].to_list()
+        labels = group["state_label"].astype(str).to_list()
+        if not values:
+            continue
+        start = 0
+        for idx in range(1, len(values) + 1):
+            if idx == len(values) or values[idx] != values[start]:
+                rows.append(
+                    {
+                        "subject": subject,
+                        "session": session,
+                        "state_label": labels[start],
+                        "dwell": idx - start,
+                    }
+                )
+                start = idx
+    return {
+        "dwell_df": pd.DataFrame(rows),
+        "state_order": state_order,
+        "title": title,
+    }
+
+
+def build_state_posterior_count_payload(
+    trial_df,
+    *,
+    title: str = "Posterior count distribution",
+) -> dict:
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", "state_label"], name="trial_df")
+    state_order, _, _ = _state_meta_from_trial_df(df)
+    count_df = (
+        df.groupby(["subject", "state_label"], observed=True)
+        .size()
+        .rename("n_trials")
+        .reset_index()
+    )
+    return {
+        "count_df": count_df,
+        "state_order": state_order,
+        "title": title,
+    }
+
+
+def build_session_deepdive_payload(
+    trial_df,
+    *,
+    subject,
+    session,
+    session_col: str = "session",
+    sort_col: str = "trial_idx",
+    trace_cols: list[str] | None = None,
+    title: str | None = None,
+) -> dict:
+    """Prepare one session for ``plot_session_deepdive``."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", session_col, sort_col], name="trial_df")
+    pcols = _posterior_cols(df)
+    if not pcols:
+        raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    work = df[(df["subject"].astype(str) == str(subject)) & (df[session_col] == session)].copy()
+    if work.empty:
+        raise ValueError(f"No rows found for subject={subject!r}, session={session!r}.")
+    work = work.sort_values(sort_col).copy()
+    work["trial_in_session"] = range(len(work))
+    posterior_df = work.melt(
+        id_vars=["trial_in_session"],
+        value_vars=pcols,
+        var_name="state_col",
+        value_name="probability",
+    )
+    posterior_df["state_idx"] = posterior_df["state_col"].str.rsplit("_", n=1).str[-1].astype(int)
+    posterior_df["state_label"] = posterior_df["state_idx"].map(label_by_idx).fillna(posterior_df["state_col"])
+    posterior_df["state_rank"] = posterior_df["state_idx"].map(rank_by_idx).fillna(posterior_df["state_idx"]).astype(int)
+
+    change_trials = []
+    if "state_idx" in work.columns:
+        values = work["state_idx"].to_numpy()
+        change_trials = (np.flatnonzero(values[1:] != values[:-1]) + 1).astype(int).tolist()
+    return {
+        "trial_df": work,
+        "posterior_df": posterior_df,
+        "state_order": state_order,
+        "change_trials": change_trials,
+        "trace_cols": list(trace_cols or []),
+        "title": title or f"Subject {subject} - session {session}",
+    }
