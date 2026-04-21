@@ -176,6 +176,7 @@ def main(
 ):
     # Compute base output directory
     base_out_dir = get_results_dir() / "fits" / task / "glm"
+    requested_emission_cols = list(emission_cols) if emission_cols is not None else None
 
     # Generate Hash
     model_hash = generate_model_id(
@@ -206,20 +207,6 @@ def main(
     # Ensure directories exist
     for d in out_dirs:
         d.mkdir(parents=True, exist_ok=True)
-        # Save config
-        with open(d / "config.json", "w") as f:
-             json.dump({
-                 "task": task,
-                 "tau": tau,
-                 "emission_cols": emission_cols,
-                 "num_classes": num_classes,
-                 "lapse_mode": lapse_mode,
-                 "lapse_max": lapse_max,
-                 "n_restarts": n_restarts,
-                 "restart_noise_scale": restart_noise_scale,
-                 "seed": seed,
-                 "model_id": d.name
-             }, f, indent=4)
         
     if verbose:
         print(
@@ -230,10 +217,46 @@ def main(
     adapter = get_adapter(task)
     num_classes = adapter.num_classes
 
+    df = adapter.read_dataset()
+    df = adapter.subject_filter(df)
+
     if subjects is None:
-        df = adapter.read_dataset()
-        df = adapter.subject_filter(df)
         subjects = df["subject"].unique().sort().to_list()
+
+    df_for_names = df.filter(pl.col("subject").is_in(subjects)) if subjects else df.head(0)
+    try:
+        resolved_design_names = adapter.resolve_design_names(
+            emission_cols=requested_emission_cols,
+            df=df_for_names,
+        )
+        resolved_emission_cols = list(resolved_design_names.get("X_cols", []))
+    except Exception:
+        resolved_emission_cols = (
+            list(requested_emission_cols)
+            if requested_emission_cols is not None
+            else None
+        )
+
+    for d in out_dirs:
+        with open(d / "config.json", "w") as f:
+            json.dump(
+                {
+                    "task": task,
+                    "tau": tau,
+                    "emission_cols": resolved_emission_cols,
+                    "requested_emission_cols": requested_emission_cols,
+                    "resolved_emission_cols": resolved_emission_cols,
+                    "num_classes": num_classes,
+                    "lapse_mode": lapse_mode,
+                    "lapse_max": lapse_max,
+                    "n_restarts": n_restarts,
+                    "restart_noise_scale": restart_noise_scale,
+                    "seed": seed,
+                    "model_id": d.name,
+                },
+                f,
+                indent=4,
+            )
 
     if verbose:
         print(f"Fitting GLM | Task={task} Tau={tau} N={len(subjects)}")
@@ -258,7 +281,7 @@ def main(
             res = fit_subject(
                 subj,
                 tau=tau,
-                emission_cols=emission_cols,
+                emission_cols=requested_emission_cols,
                 num_classes=num_classes,
                 task=task,
                 lapse_mode=lapse_mode,

@@ -48,7 +48,7 @@ def test_mcdr_build_feature_df_adds_session_bias_choice_lags_and_params(mcdr_mod
 
     np.testing.assert_array_equal(feature_df["bias_0"].to_numpy(), np.asarray([1.0, 1.0, 0.0, 0.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["bias_1"].to_numpy(), np.asarray([0.0, 0.0, 1.0, 1.0], dtype=np.float32))
-    np.testing.assert_array_equal(feature_df["bias_2"].to_numpy(), np.zeros(4, dtype=np.float32))
+    assert "bias_2" not in feature_df.columns
 
     np.testing.assert_array_equal(feature_df["choice_lag_01L"].to_numpy(), np.asarray([0.0, 1.0, 0.0, 0.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_01C"].to_numpy(), np.asarray([0.0, 0.0, 0.0, 0.0], dtype=np.float32))
@@ -104,7 +104,7 @@ def test_mcdr_default_emission_cols_expand_stim_hot_and_choice_lag_families(mcdr
     expected_choice_lags = [
         f"choice_lag_{lag_idx:02d}{side}"
         for lag_idx in range(1, 16)
-        for side in ("L", "C", "R")
+        for side in ("L", "R")
     ]
 
     assert default_cols == ["bias", *expected_stim_hot, *expected_choice_lags]
@@ -163,9 +163,11 @@ def test_mcdr_build_emission_groups_groups_side_specific_stimulus_and_choice_lag
     ]
     assert by_key["choice_lag"]["toggle_members"] == [
         "choice_lag_01L",
-        "choice_lag_01C",
         "choice_lag_01R",
         "choice_lag_02L",
-        "choice_lag_02C",
         "choice_lag_02R",
+    ]
+    assert by_key["choice_lag"]["exclude_members"] == [
+        "choice_lag_01C",
+        "choice_lag_02C",
     ]

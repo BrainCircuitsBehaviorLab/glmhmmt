@@ -518,6 +518,48 @@ def select_subject_behavior_df(
     return df_sub
 
 
+def _align_trial_frames_for_concat(
+    trial_frames: list[pl.DataFrame],
+    *,
+    views: dict,
+) -> list[pl.DataFrame]:
+    """Align per-subject trial frames before concatenating.
+
+    Subject-local one-hot regressors, such as ``bias_42`` or MCDR lag columns,
+    may be present for one fitted subject and absent for another. Missing fitted
+    feature columns are true zeros for that subject, not missing observations.
+    """
+    if not trial_frames:
+        return []
+
+    feature_cols: set[str] = set()
+    for view in views.values():
+        feature_cols.update(str(col) for col in (view.feat_names or []))
+
+    ordered_cols: list[str] = []
+    dtype_by_col: dict[str, pl.DataType] = {}
+    for frame in trial_frames:
+        for col in frame.columns:
+            if col not in dtype_by_col:
+                ordered_cols.append(col)
+                dtype_by_col[col] = frame.schema[col]
+
+    aligned: list[pl.DataFrame] = []
+    for frame in trial_frames:
+        missing_exprs = []
+        for col in ordered_cols:
+            if col in frame.columns:
+                continue
+            dtype = dtype_by_col[col]
+            fill_value = 0.0 if col in feature_cols else None
+            missing_exprs.append(pl.lit(fill_value).cast(dtype).alias(col))
+        if missing_exprs:
+            frame = frame.with_columns(missing_exprs)
+        aligned.append(frame.select(ordered_cols))
+
+    return aligned
+
+
 def build_trial_and_weights_df(
     df_all: pl.DataFrame,
     *,
@@ -541,6 +583,7 @@ def build_trial_and_weights_df(
             continue
         trial_frames.append(build_trial_df(view, adapter, df_sub, adapter.behavioral_cols))
 
-    trial_df = pl.concat(trial_frames) if trial_frames else pl.DataFrame()
+    aligned_trial_frames = _align_trial_frames_for_concat(trial_frames, views=views)
+    trial_df = pl.concat(aligned_trial_frames, how="vertical_relaxed") if aligned_trial_frames else pl.DataFrame()
     weights_df = build_emission_weights_df(views)
     return trial_df, weights_df

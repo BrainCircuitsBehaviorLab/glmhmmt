@@ -14,6 +14,13 @@ function membersForGroup(group) {
   return Object.values(group.members || {});
 }
 
+function excludedMembersForGroup(group) {
+  if (Array.isArray(group.exclude_members) && group.exclude_members.length > 0) {
+    return [...group.exclude_members];
+  }
+  return [];
+}
+
 function selectedState(selectedSet, members) {
   if (!members.length) {
     return "none";
@@ -69,6 +76,7 @@ function renderGroupSelectors(groups, selectedCols, attrName) {
           const groupState = selectedState(selectedSet, groupMembers);
           const groupStateClass = groupState === "all" ? "selected" : groupState === "partial" ? "partial" : "";
           const groupMembersJSON = JSON.stringify(groupMembers).replace(/'/g, "&#39;");
+          const groupExcludeJSON = JSON.stringify(excludedMembersForGroup(group)).replace(/'/g, "&#39;");
           const hideMembers = Boolean(group.hide_members);
           const visibleSides = ["L", "C", "N", "R"];
 
@@ -80,6 +88,7 @@ function renderGroupSelectors(groups, selectedCols, attrName) {
                 class="mm-pill mm-pill-wide ${groupStateClass}"
                 data-${attrName}-group="${escapeHTML(group.key)}"
                 data-${attrName}-members='${groupMembersJSON}'
+                data-${attrName}-exclude='${groupExcludeJSON}'
               >Toggle group</button>
             `;
           } else {
@@ -109,6 +118,7 @@ function renderGroupSelectors(groups, selectedCols, attrName) {
                 class="mm-group-header ${groupStateClass}"
                 data-${attrName}-group="${escapeHTML(group.key)}"
                 data-${attrName}-members='${groupMembersJSON}'
+                data-${attrName}-exclude='${groupExcludeJSON}'
               >
                 <span class="mm-group-title">${escapeHTML(group.label)}</span>
                 <span class="mm-group-state">${groupState === "all" ? "all" : groupState === "partial" ? "some" : "none"}</span>
@@ -260,8 +270,9 @@ function render({ model, el }) {
     model.save_changes();
   };
 
-  const toggleValues = (traitName, values) => {
+  const toggleValues = (traitName, values, excludeValues = []) => {
     const current = new Set(model.get(traitName) || []);
+    excludeValues.forEach((value) => current.delete(value));
     const allSelected = values.every((value) => current.has(value));
     if (allSelected) {
       values.forEach((value) => current.delete(value));
@@ -627,12 +638,14 @@ function render({ model, el }) {
 
     bindAll("[data-emission-group]", "click", (event) => {
       const raw = event.currentTarget.dataset.emissionMembers || "[]";
-      toggleValues("emission_cols", JSON.parse(raw));
+      const exclude = event.currentTarget.dataset.emissionExclude || "[]";
+      toggleValues("emission_cols", JSON.parse(raw), JSON.parse(exclude));
     });
 
     bindAll("[data-transition-group]", "click", (event) => {
       const raw = event.currentTarget.dataset.transitionMembers || "[]";
-      toggleValues("transition_cols", JSON.parse(raw));
+      const exclude = event.currentTarget.dataset.transitionExclude || "[]";
+      toggleValues("transition_cols", JSON.parse(raw), JSON.parse(exclude));
     });
 
     bind("#inp-task", "change", (event) => {

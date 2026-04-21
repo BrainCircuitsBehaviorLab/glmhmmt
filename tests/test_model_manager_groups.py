@@ -87,7 +87,7 @@ def test_refresh_groups_uses_hidden_families_for_2afc_delay(monkeypatch, tmp_pat
     assert "choice_lag_01" not in by_key
 
 
-def test_build_mcdr_emission_groups_exposes_side_grouped_stim_and_choice_lags():
+def test_build_mcdr_emission_groups_keeps_bulk_stim_and_choice_lag_toggles():
     groups = widget_module._build_mcdr_emission_groups(
         [
             "bias",
@@ -113,16 +113,13 @@ def test_build_mcdr_emission_groups_exposes_side_grouped_stim_and_choice_lags():
     by_key = {group["key"]: group for group in groups}
 
     assert by_key["bias_hot"]["toggle_members"] == ["bias_0", "bias_1"]
-    assert by_key["stim1"]["members"] == {"L": "stim1L", "C": "stim1C", "R": "stim1R"}
-    assert by_key["stim4"]["members"] == {"L": "stim4L", "C": "stim4C", "R": "stim4R"}
     assert by_key["stim_one_hot"]["toggle_members"] == ["stim1L", "stim1C", "stim1R", "stim4L", "stim4C", "stim4R"]
     assert by_key["stim_one_hot"]["hide_members"] is True
-    assert by_key["choice_lag_01"]["members"] == {
-        "L": "choice_lag_01L",
-        "C": "choice_lag_01C",
-        "R": "choice_lag_01R",
-    }
-    assert by_key["choice_lag"]["toggle_members"] == ["choice_lag_01L", "choice_lag_01C", "choice_lag_01R"]
+    assert by_key["choice_lag"]["toggle_members"] == ["choice_lag_01L", "choice_lag_01R"]
+    assert by_key["choice_lag"]["exclude_members"] == ["choice_lag_01C"]
     assert by_key["choice_lag"]["hide_members"] is True
     assert by_key["stim_param"]["members"] == {"N": "stim_param"}
     assert by_key["choice_lag_param"]["members"] == {"N": "choice_lag_param"}
+    assert "stim1" not in by_key
+    assert "stim4" not in by_key
+    assert "choice_lag_01" not in by_key

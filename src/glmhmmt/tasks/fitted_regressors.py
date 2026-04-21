@@ -73,18 +73,40 @@ def _resolved_source_features_cached(
     with open(config_path, "r") as f:
         config = json.load(f)
 
-    emission_cols = tuple(str(col) for col in config.get("emission_cols", []))
-    exclude = set(spec.exclude_features)
-    if spec.source_feature_prefixes:
-        prefixes = tuple(spec.source_feature_prefixes)
-        resolved = tuple(
-            col
-            for col in emission_cols
-            if any(col.startswith(prefix) for prefix in prefixes)
-            and col not in exclude
+    emission_cols = tuple(
+        str(col)
+        for col in (
+            config.get("resolved_emission_cols")
+            or config.get("emission_cols")
+            or []
         )
-    else:
-        resolved = tuple(col for col in emission_cols if col not in exclude)
+    )
+    exclude = set(spec.exclude_features)
+
+    def _resolve_from_columns(columns: tuple[str, ...]) -> tuple[str, ...]:
+        if spec.source_feature_prefixes:
+            prefixes = tuple(spec.source_feature_prefixes)
+            return tuple(
+                col
+                for col in columns
+                if any(col.startswith(prefix) for prefix in prefixes)
+                and col not in exclude
+            )
+        return tuple(col for col in columns if col not in exclude)
+
+    resolved = _resolve_from_columns(emission_cols)
+    if not resolved and spec.source_feature_prefixes:
+        fit_dir = _fit_dir(spec)
+        for arr_path in sorted(fit_dir.glob(f"*_{spec.arrays_suffix}")):
+            with np.load(arr_path, allow_pickle=True) as arr:
+                x_cols_raw = arr.get("X_cols")
+                if x_cols_raw is None:
+                    continue
+                array_cols = tuple(str(col) for col in x_cols_raw.tolist())
+            resolved = _resolve_from_columns(array_cols)
+            if resolved:
+                break
+
     if not resolved:
         if spec.source_feature_prefixes:
             source_desc = (

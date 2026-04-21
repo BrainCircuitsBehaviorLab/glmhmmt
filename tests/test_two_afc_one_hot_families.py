@@ -43,7 +43,7 @@ def test_two_afc_build_feature_df_adds_session_bias_and_choice_lags(two_afc_modu
 
     np.testing.assert_array_equal(feature_df["bias_0"].to_numpy(), np.asarray([1.0, 1.0, 0.0, 0.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["bias_1"].to_numpy(), np.asarray([0.0, 0.0, 1.0, 1.0], dtype=np.float32))
-    np.testing.assert_array_equal(feature_df["bias_2"].to_numpy(), np.zeros(4, dtype=np.float32))
+    assert "bias_2" not in feature_df.columns
 
     np.testing.assert_array_equal(feature_df["choice_lag_01"].to_numpy(), np.asarray([0.0, -1.0, 0.0, 1.0], dtype=np.float32))
     np.testing.assert_array_equal(feature_df["choice_lag_02"].to_numpy(), np.zeros(4, dtype=np.float32))
@@ -83,7 +83,6 @@ def test_two_afc_default_emission_cols_expand_bias_stim_and_choice_lag_families(
     assert default_cols == [
         "bias_0",
         "bias_1",
-        "bias_2",
         "stim_2",
         "stim_4",
         "stim_8",
