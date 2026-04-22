@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.23
+- Centered change-triggered posterior traces on the state-change boundary rather than the first trial after the change.
+- Increased the default posterior histogram resolution and split the occupancy overview into separately callable overall occupancy, session occupancy, and state-switch plots.
+
 ## 0.1.22
 - Restored the legacy visual style for the new payload-based common model plots, including the session deep dive, change-triggered posteriors, state occupancy, posterior histograms, state accuracy, and dwell-time summaries.
 - Kept the strict postprocess/plot separation while enriching the plot payloads with the extra metadata needed for the original visual grammar: action traces, rolling accuracy, transition-derived dwell predictions, posterior histograms, and subject-level summaries.

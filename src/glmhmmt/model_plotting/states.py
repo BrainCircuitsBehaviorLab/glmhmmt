@@ -173,7 +173,7 @@ def plot_state_occupancy_overall_boxplot(payload: dict) -> plt.Figure:
     return fig
 
 
-def plot_state_occupancy(payload: dict) -> plt.Figure:
+def _state_occupancy_components(payload: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], dict[str, str], list[str]]:
     occupancy_df = to_pandas_df(payload.get("occupancy_df"), name="occupancy_df")
     session_df = to_pandas_df(payload.get("session_occupancy_df"), name="session_occupancy_df")
     require_columns(occupancy_df, ["subject", "state_label", "occupancy"], name="occupancy_df")
@@ -187,6 +187,98 @@ def plot_state_occupancy(payload: dict) -> plt.Figure:
     states = payload.get("state_order") or resolve_state_order(occupancy_df)
     palette = state_palette(states)
     subjects = list(pd.unique(occupancy_df["subject"].astype(str)))
+    return occupancy_df, session_df, switches, states, palette, subjects
+
+
+def plot_state_occupancy_overall(payload: dict) -> plt.Figure:
+    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
+    colors = [palette[state] for state in states]
+
+    ax_all_occ = axes[0, 0]
+    _plot_state_distribution(
+        ax_all_occ,
+        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax_all_occ.set_ylim(0, 1)
+    ax_all_occ.set_ylabel("Fractional occupancy")
+    ax_all_occ.set_title("All selected subjects - overall occupancy")
+
+    for row_idx, subject in enumerate(subjects, start=1):
+        subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
+        ax_occ = axes[row_idx, 0]
+        occ = (
+            subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
+            .reindex(states)
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        ax_occ.bar(states, occ, color=colors, alpha=0.85)
+        ax_occ.set_ylim(0, 1)
+        ax_occ.set_ylabel("Fractional occupancy")
+        ax_occ.set_title(f"Subject {subject} - overall occupancy")
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_session_occupancy(payload: dict) -> plt.Figure:
+    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
+    colors = [palette[state] for state in states]
+
+    ax_all_sess = axes[0, 0]
+    _plot_session_violin(
+        ax_all_sess,
+        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax_all_sess.set_ylabel("Session occupancy")
+    ax_all_sess.set_title("All selected sessions - occupancy by session")
+
+    for row_idx, subject in enumerate(subjects, start=1):
+        subj_session = session_df[session_df["subject"].astype(str) == subject]
+        ax_box = axes[row_idx, 0]
+        _plot_session_violin(
+            ax_box,
+            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+            states,
+            colors,
+        )
+        ax_box.set_ylabel("Session occupancy")
+        ax_box.set_title(f"Subject {subject} - occupancy by session")
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_switches(payload: dict) -> plt.Figure:
+    _, _, switches, _, _, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
+
+    ax_all_chg = axes[0, 0]
+    _plot_switch_hist(ax_all_chg, switches["n_switches"].to_numpy(dtype=float), "All selected sessions - state switches")
+
+    for row_idx, subject in enumerate(subjects, start=1):
+        subj_switch = switches[switches["subject"].astype(str) == subject]
+        ax_chg = axes[row_idx, 0]
+        _plot_switch_hist(ax_chg, subj_switch["n_switches"].to_numpy(dtype=float), f"Subject {subject} - state switches")
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_occupancy(payload: dict) -> plt.Figure:
+    occupancy_df, session_df, switches, states, palette, subjects = _state_occupancy_components(payload)
     n_rows = len(subjects) + 1
     fig, axes = plt.subplots(n_rows, 3, figsize=payload.get("figsize", (14, 3.8 * n_rows)), squeeze=False)
     colors = [palette[state] for state in states]
@@ -333,7 +425,7 @@ def plot_state_posterior_count_kde(payload: dict) -> plt.Figure:
         raise ValueError("posterior_df is empty.")
     states = payload.get("state_order") or resolve_state_order(posterior_df)
     palette = state_palette(states)
-    bins = int(payload.get("bins", 20))
+    bins = int(payload.get("bins", 40))
     edges = np.linspace(0.0, 1.0, bins + 1)
     fig, ax = plt.subplots(figsize=payload.get("figsize", (5, 4)))
     legend_handles = []
@@ -413,7 +505,10 @@ def plot_change_triggered_posteriors_summary(payload: dict) -> plt.Figure:
     directions = list(payload.get("directions") or pd.unique(change_df["direction"].astype(str)))
     if "window" in payload:
         window = int(payload["window"])
-        x = np.arange(-window, window + 1, dtype=int)
+        if payload.get("event_center") == "boundary":
+            x = np.arange(-window, window, dtype=float) + 0.5
+        else:
+            x = np.arange(-window, window + 1, dtype=int)
     else:
         x = np.asarray(sorted(pd.unique(change_df["relative_trial"])), dtype=float)
     fig, axes = plt.subplots(1, len(directions), figsize=payload.get("figsize", (14.0, 4.4)), squeeze=False, sharex=True, sharey=True)
@@ -480,7 +575,10 @@ def plot_change_triggered_posteriors_by_subject(payload: dict) -> plt.Figure:
     subjects = list(pd.unique(change_df["subject"].astype(str)))
     if "window" in payload:
         window = int(payload["window"])
-        x = np.arange(-window, window + 1, dtype=int)
+        if payload.get("event_center") == "boundary":
+            x = np.arange(-window, window, dtype=float) + 0.5
+        else:
+            x = np.arange(-window, window + 1, dtype=int)
     else:
         x = np.asarray(sorted(pd.unique(change_df["relative_trial"])), dtype=float)
     fig, axes = plt.subplots(

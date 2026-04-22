@@ -962,7 +962,13 @@ def build_change_triggered_posteriors_payload(
     window: int = 15,
     title: str = "Change-triggered posteriors",
 ) -> dict:
-    """Prepare posterior traces around confident MAP-state changes."""
+    """Prepare posterior traces around confident MAP-state changes.
+
+    Change events are trial boundaries. If the MAP posterior state changes from
+    trial ``t - 1`` to trial ``t``, the event is at ``t - 0.5``. Relative trial
+    coordinates therefore use half-integers so the vertical event line can sit
+    on the boundary instead of on the first trial after the change.
+    """
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", session_col, sort_col, "state_idx"], name="trial_df")
     pcols = _posterior_cols(df)
@@ -994,9 +1000,9 @@ def build_change_triggered_posteriors_payload(
             for event_idx, change_trial in enumerate(change_indices):
                 change_id = f"{subject}:{session}:{direction}:{event_idx}"
                 lo = max(0, int(change_trial) - int(window))
-                hi = min(len(group), int(change_trial) + int(window) + 1)
+                hi = min(len(group), int(change_trial) + int(window))
                 for row_idx in range(lo, hi):
-                    rel = int(row_idx - int(change_trial))
+                    rel = float(row_idx - int(change_trial) + 0.5)
                     p_engaged = float(probs[row_idx, engaged_idx])
                     for state_idx, state_label, probability in (
                         (engaged_idx, engaged_label, p_engaged),
@@ -1031,6 +1037,7 @@ def build_change_triggered_posteriors_payload(
         "state_order": [engaged_label, non_engaged_label],
         "directions": ["into_engaged", "out_of_engaged"],
         "window": int(window),
+        "event_center": "boundary",
         "title": title,
     }
 
@@ -1192,6 +1199,7 @@ def build_state_dwell_times_payload(
 def build_state_posterior_count_payload(
     trial_df,
     *,
+    bins: int = 40,
     title: str = "Posterior count distribution",
 ) -> dict:
     df = _as_pandas_df(trial_df, name="trial_df")
@@ -1219,7 +1227,7 @@ def build_state_posterior_count_payload(
         "count_df": count_df,
         "posterior_df": posterior_df,
         "state_order": state_order,
-        "bins": 20,
+        "bins": int(bins),
         "title": title,
     }
 

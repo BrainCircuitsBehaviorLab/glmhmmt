@@ -39,7 +39,7 @@ def test_common_plot_payload_builders_return_explicit_tables():
 
     accuracy = build_state_accuracy_payload(df)
     trajectories = build_session_trajectories_payload(df)
-    change = build_change_triggered_posteriors_payload(df, window=0)
+    change = build_change_triggered_posteriors_payload(df, window=1)
     occupancy = build_state_occupancy_payload(df)
     dwell = build_state_dwell_times_payload(df)
     counts = build_state_posterior_count_payload(df)
@@ -65,10 +65,13 @@ def test_common_state_plots_keep_payload_contracts():
 
     assert isinstance(model_plots.plot_state_posterior_count_kde(build_state_posterior_count_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_occupancy(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_occupancy_overall(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_session_occupancy(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_switches(build_state_occupancy_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_dwell_times_summary(build_state_dwell_times_payload(df)), Figure)
     assert isinstance(
             model_plots.plot_change_triggered_posteriors_summary(
-                build_change_triggered_posteriors_payload(df, window=0)
+                build_change_triggered_posteriors_payload(df, window=1)
             ),
         Figure,
     )
@@ -96,22 +99,28 @@ def test_change_triggered_payload_uses_posterior_direction_and_non_engaged_trace
     assert payload["state_order"] == ["Engaged", "Disengaged"]
     assert set(change_df["direction"]) == {"out_of_engaged", "into_engaged"}
 
-    out_rel0 = change_df[
+    out_before = change_df[
         (change_df["direction"] == "out_of_engaged")
-        & (change_df["relative_trial"] == 0)
+        & (change_df["relative_trial"] == -0.5)
         & (change_df["state_label"] == "Engaged")
     ]["probability"].iloc[0]
-    in_rel0 = change_df[
+    out_after = change_df[
+        (change_df["direction"] == "out_of_engaged")
+        & (change_df["relative_trial"] == 0.5)
+        & (change_df["state_label"] == "Engaged")
+    ]["probability"].iloc[0]
+    in_after = change_df[
         (change_df["direction"] == "into_engaged")
-        & (change_df["relative_trial"] == 0)
+        & (change_df["relative_trial"] == 0.5)
         & (change_df["state_label"] == "Engaged")
     ]["probability"].iloc[0]
     non_engaged_out = change_df[
         (change_df["direction"] == "out_of_engaged")
-        & (change_df["relative_trial"] == 0)
+        & (change_df["relative_trial"] == 0.5)
         & (change_df["state_label"] == "Disengaged")
     ]["probability"].iloc[0]
 
-    assert out_rel0 == 0.2
-    assert in_rel0 == 0.8
+    assert out_before == 0.8
+    assert out_after == 0.2
+    assert in_after == 0.8
     assert non_engaged_out == 0.8

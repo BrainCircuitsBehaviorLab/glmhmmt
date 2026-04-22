@@ -29,8 +29,11 @@ from glmhmmt.model_plotting.states import (
     plot_state_dwell_times_by_subject,
     plot_state_dwell_times_summary,
     plot_state_occupancy,
+    plot_state_occupancy_overall,
     plot_state_occupancy_overall_boxplot,
     plot_state_posterior_count_kde,
+    plot_state_session_occupancy,
+    plot_state_switches,
 )
 from glmhmmt.model_plotting.transitions import (
     plot_transition_matrix,
@@ -58,8 +61,11 @@ __all__ = [
     "plot_state_dwell_times_by_subject",
     "plot_state_dwell_times_summary",
     "plot_state_occupancy",
+    "plot_state_occupancy_overall",
     "plot_state_occupancy_overall_boxplot",
     "plot_state_posterior_count_kde",
+    "plot_state_session_occupancy",
+    "plot_state_switches",
     "plot_transition_matrix",
     "plot_transition_matrix_by_subject",
 ]
