@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.24
+- Added summary and by-subject variants for the occupàncy plots.
+
 ## 0.1.23
 - Centered change-triggered posterior traces on the state-change boundary rather than the first trial after the change.
 - Increased the default posterior histogram resolution and split the occupancy overview into separately callable overall occupancy, session occupancy, and state-switch plots.

@@ -66,8 +66,14 @@ def test_common_state_plots_keep_payload_contracts():
     assert isinstance(model_plots.plot_state_posterior_count_kde(build_state_posterior_count_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_occupancy(build_state_occupancy_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_occupancy_overall(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_occupancy_overall_summary(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_occupancy_overall_by_subject(build_state_occupancy_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_session_occupancy(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_session_occupancy_summary(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_session_occupancy_by_subject(build_state_occupancy_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_switches(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_switches_summary(build_state_occupancy_payload(df)), Figure)
+    assert isinstance(model_plots.plot_state_switches_by_subject(build_state_occupancy_payload(df)), Figure)
     assert isinstance(model_plots.plot_state_dwell_times_summary(build_state_dwell_times_payload(df)), Figure)
     assert isinstance(
             model_plots.plot_change_triggered_posteriors_summary(

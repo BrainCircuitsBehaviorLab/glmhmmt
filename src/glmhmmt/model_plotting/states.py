@@ -190,36 +190,149 @@ def _state_occupancy_components(payload: dict) -> tuple[pd.DataFrame, pd.DataFra
     return occupancy_df, session_df, switches, states, palette, subjects
 
 
+def _plot_occupancy_overall_summary_ax(
+    ax: plt.Axes,
+    occupancy_df: pd.DataFrame,
+    states: list[str],
+    colors: list[str],
+) -> None:
+    _plot_state_distribution(
+        ax,
+        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("Fractional occupancy")
+    ax.set_title("All selected subjects - overall occupancy")
+
+
+def _plot_occupancy_overall_subject_ax(
+    ax: plt.Axes,
+    occupancy_df: pd.DataFrame,
+    subject: str,
+    states: list[str],
+    colors: list[str],
+) -> None:
+    subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
+    occ = (
+        subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
+        .reindex(states)
+        .fillna(0.0)
+        .to_numpy(dtype=float)
+    )
+    ax.bar(states, occ, color=colors, alpha=0.85)
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("Fractional occupancy")
+    ax.set_title(f"Subject {subject} - overall occupancy")
+
+
+def _plot_session_occupancy_summary_ax(
+    ax: plt.Axes,
+    session_df: pd.DataFrame,
+    states: list[str],
+    colors: list[str],
+) -> None:
+    _plot_session_violin(
+        ax,
+        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax.set_ylabel("Session occupancy")
+    ax.set_title("All selected sessions - occupancy by session")
+
+
+def _plot_session_occupancy_subject_ax(
+    ax: plt.Axes,
+    session_df: pd.DataFrame,
+    subject: str,
+    states: list[str],
+    colors: list[str],
+) -> None:
+    subj_session = session_df[session_df["subject"].astype(str) == subject]
+    _plot_session_violin(
+        ax,
+        _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax.set_ylabel("Session occupancy")
+    ax.set_title(f"Subject {subject} - occupancy by session")
+
+
+def _plot_switches_summary_ax(ax: plt.Axes, switches: pd.DataFrame) -> None:
+    _plot_switch_hist(ax, switches["n_switches"].to_numpy(dtype=float), "All selected sessions - state switches")
+
+
+def _plot_switches_subject_ax(ax: plt.Axes, switches: pd.DataFrame, subject: str) -> None:
+    subj_switch = switches[switches["subject"].astype(str) == subject]
+    _plot_switch_hist(ax, subj_switch["n_switches"].to_numpy(dtype=float), f"Subject {subject} - state switches")
+
+
+def plot_state_occupancy_overall_summary(payload: dict) -> plt.Figure:
+    occupancy_df, _, _, states, palette, _ = _state_occupancy_components(payload)
+    fig, ax = plt.subplots(figsize=payload.get("figsize", (max(5.0, 1.8 * len(states)), 4.2)))
+    _plot_occupancy_overall_summary_ax(ax, occupancy_df, states, [palette[state] for state in states])
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_occupancy_overall_by_subject(payload: dict) -> plt.Figure:
+    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
+    fig, axes = plt.subplots(
+        len(subjects),
+        1,
+        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
+        squeeze=False,
+    )
+    colors = [palette[state] for state in states]
+
+    for ax, subject in zip(axes[:, 0], subjects, strict=False):
+        _plot_occupancy_overall_subject_ax(ax, occupancy_df, subject, states, colors)
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
 def plot_state_occupancy_overall(payload: dict) -> plt.Figure:
     occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
     n_rows = len(subjects) + 1
     fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
     colors = [palette[state] for state in states]
 
-    ax_all_occ = axes[0, 0]
-    _plot_state_distribution(
-        ax_all_occ,
-        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
-        states,
-        colors,
-    )
-    ax_all_occ.set_ylim(0, 1)
-    ax_all_occ.set_ylabel("Fractional occupancy")
-    ax_all_occ.set_title("All selected subjects - overall occupancy")
-
+    _plot_occupancy_overall_summary_ax(axes[0, 0], occupancy_df, states, colors)
     for row_idx, subject in enumerate(subjects, start=1):
-        subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
-        ax_occ = axes[row_idx, 0]
-        occ = (
-            subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
-            .reindex(states)
-            .fillna(0.0)
-            .to_numpy(dtype=float)
-        )
-        ax_occ.bar(states, occ, color=colors, alpha=0.85)
-        ax_occ.set_ylim(0, 1)
-        ax_occ.set_ylabel("Fractional occupancy")
-        ax_occ.set_title(f"Subject {subject} - overall occupancy")
+        _plot_occupancy_overall_subject_ax(axes[row_idx, 0], occupancy_df, subject, states, colors)
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_session_occupancy_summary(payload: dict) -> plt.Figure:
+    _, session_df, _, states, palette, _ = _state_occupancy_components(payload)
+    fig, ax = plt.subplots(figsize=payload.get("figsize", (max(5.0, 1.8 * len(states)), 4.2)))
+    _plot_session_occupancy_summary_ax(ax, session_df, states, [palette[state] for state in states])
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_session_occupancy_by_subject(payload: dict) -> plt.Figure:
+    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
+    fig, axes = plt.subplots(
+        len(subjects),
+        1,
+        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
+        squeeze=False,
+    )
+    colors = [palette[state] for state in states]
+
+    for ax, subject in zip(axes[:, 0], subjects, strict=False):
+        _plot_session_occupancy_subject_ax(ax, session_df, subject, states, colors)
 
     sns.despine(fig=fig)
     fig.tight_layout()
@@ -232,27 +345,35 @@ def plot_state_session_occupancy(payload: dict) -> plt.Figure:
     fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
     colors = [palette[state] for state in states]
 
-    ax_all_sess = axes[0, 0]
-    _plot_session_violin(
-        ax_all_sess,
-        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
-        states,
-        colors,
-    )
-    ax_all_sess.set_ylabel("Session occupancy")
-    ax_all_sess.set_title("All selected sessions - occupancy by session")
-
+    _plot_session_occupancy_summary_ax(axes[0, 0], session_df, states, colors)
     for row_idx, subject in enumerate(subjects, start=1):
-        subj_session = session_df[session_df["subject"].astype(str) == subject]
-        ax_box = axes[row_idx, 0]
-        _plot_session_violin(
-            ax_box,
-            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
-            states,
-            colors,
-        )
-        ax_box.set_ylabel("Session occupancy")
-        ax_box.set_title(f"Subject {subject} - occupancy by session")
+        _plot_session_occupancy_subject_ax(axes[row_idx, 0], session_df, subject, states, colors)
+
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_switches_summary(payload: dict) -> plt.Figure:
+    _, _, switches, _, _, _ = _state_occupancy_components(payload)
+    fig, ax = plt.subplots(figsize=payload.get("figsize", (5.0, 4.2)))
+    _plot_switches_summary_ax(ax, switches)
+    sns.despine(fig=fig)
+    fig.tight_layout()
+    return fig
+
+
+def plot_state_switches_by_subject(payload: dict) -> plt.Figure:
+    _, _, switches, _, _, subjects = _state_occupancy_components(payload)
+    fig, axes = plt.subplots(
+        len(subjects),
+        1,
+        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
+        squeeze=False,
+    )
+
+    for ax, subject in zip(axes[:, 0], subjects, strict=False):
+        _plot_switches_subject_ax(ax, switches, subject)
 
     sns.despine(fig=fig)
     fig.tight_layout()
@@ -264,13 +385,9 @@ def plot_state_switches(payload: dict) -> plt.Figure:
     n_rows = len(subjects) + 1
     fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
 
-    ax_all_chg = axes[0, 0]
-    _plot_switch_hist(ax_all_chg, switches["n_switches"].to_numpy(dtype=float), "All selected sessions - state switches")
-
+    _plot_switches_summary_ax(axes[0, 0], switches)
     for row_idx, subject in enumerate(subjects, start=1):
-        subj_switch = switches[switches["subject"].astype(str) == subject]
-        ax_chg = axes[row_idx, 0]
-        _plot_switch_hist(ax_chg, subj_switch["n_switches"].to_numpy(dtype=float), f"Subject {subject} - state switches")
+        _plot_switches_subject_ax(axes[row_idx, 0], switches, subject)
 
     sns.despine(fig=fig)
     fig.tight_layout()
@@ -284,51 +401,15 @@ def plot_state_occupancy(payload: dict) -> plt.Figure:
     colors = [palette[state] for state in states]
 
     ax_all_occ, ax_all_sess, ax_all_chg = axes[0]
-    _plot_state_distribution(
-        ax_all_occ,
-        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
-        states,
-        colors,
-    )
-    ax_all_occ.set_ylim(0, 1)
-    ax_all_occ.set_ylabel("Fractional occupancy")
-    ax_all_occ.set_title("All selected subjects - overall occupancy")
-
-    _plot_session_violin(
-        ax_all_sess,
-        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
-        states,
-        colors,
-    )
-    ax_all_sess.set_ylabel("Session occupancy")
-    ax_all_sess.set_title("All selected sessions - occupancy by session")
-    _plot_switch_hist(ax_all_chg, switches["n_switches"].to_numpy(dtype=float), "All selected sessions - state switches")
+    _plot_occupancy_overall_summary_ax(ax_all_occ, occupancy_df, states, colors)
+    _plot_session_occupancy_summary_ax(ax_all_sess, session_df, states, colors)
+    _plot_switches_summary_ax(ax_all_chg, switches)
 
     for row_idx, subject in enumerate(subjects, start=1):
-        subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
-        subj_session = session_df[session_df["subject"].astype(str) == subject]
-        subj_switch = switches[switches["subject"].astype(str) == subject]
         ax_occ, ax_box, ax_chg = axes[row_idx]
-        occ = (
-            subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
-            .reindex(states)
-            .fillna(0.0)
-            .to_numpy(dtype=float)
-        )
-        ax_occ.bar(states, occ, color=colors, alpha=0.85)
-        ax_occ.set_ylim(0, 1)
-        ax_occ.set_ylabel("Fractional occupancy")
-        ax_occ.set_title(f"Subject {subject} - overall occupancy")
-
-        _plot_session_violin(
-            ax_box,
-            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
-            states,
-            colors,
-        )
-        ax_box.set_ylabel("Session occupancy")
-        ax_box.set_title(f"Subject {subject} - occupancy by session")
-        _plot_switch_hist(ax_chg, subj_switch["n_switches"].to_numpy(dtype=float), f"Subject {subject} - state switches")
+        _plot_occupancy_overall_subject_ax(ax_occ, occupancy_df, subject, states, colors)
+        _plot_session_occupancy_subject_ax(ax_box, session_df, subject, states, colors)
+        _plot_switches_subject_ax(ax_chg, switches, subject)
 
     sns.despine(fig=fig)
     fig.tight_layout()
