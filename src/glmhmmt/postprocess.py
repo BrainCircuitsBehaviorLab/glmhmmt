@@ -750,6 +750,138 @@ def _state_meta_from_trial_df(df) -> tuple[list[str], dict[int, str], dict[int, 
     return state_order, label_by_idx, rank_by_idx
 
 
+def _transition_matrix_from_view(view) -> np.ndarray | None:
+    transition_matrix = getattr(view, "transition_matrix", None)
+    if transition_matrix is not None:
+        matrix = np.asarray(transition_matrix, dtype=float)
+        return matrix if matrix.ndim == 2 else None
+
+    transition_bias = getattr(view, "transition_bias", None)
+    transition_weights = getattr(view, "transition_weights", None)
+    if transition_bias is None or transition_weights is not None:
+        return None
+    bias = np.asarray(transition_bias, dtype=float)
+    if bias.ndim != 2:
+        return None
+    shifted = bias - bias.max(axis=-1, keepdims=True)
+    exp_shifted = np.exp(shifted)
+    return exp_shifted / exp_shifted.sum(axis=-1, keepdims=True)
+
+
+def _geometric_dwell_pmf(self_prob: float, max_dwell: int) -> np.ndarray:
+    p = float(np.clip(self_prob, 0.0, np.nextafter(1.0, 0.0)))
+    dwell = np.arange(1, max_dwell + 1, dtype=float)
+    return (1.0 - p) * np.power(p, dwell - 1.0)
+
+
+def _normal_z_for_ci(ci_level: float) -> float:
+    ci_level = float(ci_level)
+    if ci_level <= 0.70:
+        return 1.0
+    if ci_level <= 0.90:
+        return 1.645
+    if ci_level <= 0.95:
+        return 1.96
+    return 2.576
+
+
+def _binomial_interval(counts: np.ndarray, total: int, ci_level: float) -> tuple[np.ndarray, np.ndarray]:
+    counts = np.asarray(counts, dtype=float)
+    if total <= 0:
+        zeros = np.zeros_like(counts, dtype=float)
+        return zeros, zeros
+    phat = counts / float(total)
+    z = _normal_z_for_ci(ci_level)
+    half_width = z * np.sqrt(np.clip(phat * (1.0 - phat) / float(total), 0.0, None))
+    return np.clip(phat - half_width, 0.0, 1.0), np.clip(phat + half_width, 0.0, 1.0)
+
+
+def _binned_dwell_summary(
+    dwell_lengths: np.ndarray,
+    *,
+    max_dwell: int,
+    bin_width: int,
+    ci_level: float,
+    self_prob: float | None = None,
+) -> tuple[np.ndarray, np.ndarray | None, np.ndarray, np.ndarray]:
+    n_bins = int(np.ceil(max_dwell / float(bin_width)))
+    centers = bin_width * np.arange(n_bins, dtype=float) + (bin_width / 2.0)
+    predicted = None
+    if self_prob is not None:
+        predicted_full = _geometric_dwell_pmf(float(self_prob), max_dwell)
+        predicted = np.zeros(n_bins, dtype=float)
+        for bin_idx in range(n_bins):
+            lo = bin_idx * bin_width
+            hi = min((bin_idx + 1) * bin_width, max_dwell)
+            predicted[bin_idx] = float(np.sum(predicted_full[lo:hi]))
+
+    dwell_lengths = np.asarray(dwell_lengths, dtype=int)
+    total_runs = int(dwell_lengths.size)
+    if total_runs == 0:
+        zeros = np.zeros(n_bins, dtype=float)
+        return centers, predicted, zeros, np.vstack([zeros, zeros])
+
+    in_range = dwell_lengths[(dwell_lengths >= 1) & (dwell_lengths <= max_dwell)]
+    if in_range.size == 0:
+        zeros = np.zeros(n_bins, dtype=float)
+        return centers, predicted, zeros, np.vstack([zeros, zeros])
+
+    bin_idx = (in_range - 1) // int(bin_width)
+    counts = np.bincount(bin_idx, minlength=n_bins)[:n_bins]
+    empirical = counts / float(total_runs)
+    ci_low, ci_high = _binomial_interval(counts, total_runs, ci_level)
+    yerr = np.vstack(
+        [
+            np.clip(empirical - ci_low, 0.0, None),
+            np.clip(ci_high - empirical, 0.0, None),
+        ]
+    )
+    return centers, predicted, empirical, yerr
+
+
+def _infer_engaged_state_idx(label_by_idx: dict[int, str], rank_by_idx: dict[int, int]) -> int:
+    for idx, label in label_by_idx.items():
+        normalized = label.lower()
+        if "engaged" in normalized and "dis" not in normalized:
+            return int(idx)
+    return int(sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))[0])
+
+
+def _confident_change_events_by_direction(
+    probs: np.ndarray,
+    *,
+    engaged_idx: int,
+    posterior_threshold: float | None,
+) -> dict[str, np.ndarray]:
+    empty = {
+        "into_engaged": np.array([], dtype=int),
+        "out_of_engaged": np.array([], dtype=int),
+    }
+    if len(probs) <= 1:
+        return empty
+
+    if posterior_threshold is None:
+        keep_idx = np.arange(len(probs), dtype=int)
+        confident_states = np.argmax(probs, axis=1)
+    else:
+        keep_idx = np.flatnonzero(np.max(probs, axis=1) >= float(posterior_threshold))
+        if keep_idx.size <= 1:
+            return empty
+        confident_states = np.argmax(probs[keep_idx], axis=1)
+
+    change_mask = np.diff(confident_states) != 0
+    if not np.any(change_mask):
+        return empty
+
+    prev_states = confident_states[:-1][change_mask]
+    next_states = confident_states[1:][change_mask]
+    change_idx = keep_idx[1:][change_mask]
+    return {
+        "into_engaged": change_idx[(prev_states != engaged_idx) & (next_states == engaged_idx)],
+        "out_of_engaged": change_idx[(prev_states == engaged_idx) & (next_states != engaged_idx)],
+    }
+
+
 def build_state_accuracy_payload(
     trial_df,
     *,
@@ -768,6 +900,13 @@ def build_state_accuracy_payload(
         .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
         .reset_index()
     )
+    all_df = (
+        work.groupby("subject", observed=True)
+        .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
+        .reset_index()
+    )
+    all_df["state_label"] = "All"
+    accuracy_df = pd.concat([all_df[["subject", "state_label", "accuracy", "n_trials"]], accuracy_df], ignore_index=True)
     return {
         "accuracy_df": accuracy_df,
         "state_order": state_order,
@@ -810,6 +949,88 @@ def build_session_trajectories_payload(
     return {
         "trajectory_df": trajectory_df,
         "state_order": state_order,
+        "title": title,
+    }
+
+
+def build_change_triggered_posteriors_payload(
+    trial_df,
+    *,
+    session_col: str = "session",
+    sort_col: str = "trial_idx",
+    switch_posterior_threshold: float | None = None,
+    window: int = 15,
+    title: str = "Change-triggered posteriors",
+) -> dict:
+    """Prepare posterior traces around confident MAP-state changes."""
+    df = _as_pandas_df(trial_df, name="trial_df")
+    _require_columns(df, ["subject", session_col, sort_col, "state_idx"], name="trial_df")
+    pcols = _posterior_cols(df)
+    if not pcols:
+        raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    engaged_idx = _infer_engaged_state_idx(label_by_idx, rank_by_idx)
+    non_engaged_candidates = [
+        idx
+        for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
+        if idx != engaged_idx
+    ]
+    if not non_engaged_candidates:
+        raise ValueError("Change-triggered posteriors require at least two states.")
+    non_engaged_idx = int(non_engaged_candidates[0])
+    engaged_label = label_by_idx[engaged_idx]
+    non_engaged_label = label_by_idx[non_engaged_idx] if len(non_engaged_candidates) == 1 else "Non-engaged"
+
+    rows = []
+    work = df.sort_values(["subject", session_col, sort_col]).copy()
+    for (subject, session), group in work.groupby(["subject", session_col], observed=True):
+        probs = group[pcols].to_numpy(dtype=float)
+        change_idx_by_direction = _confident_change_events_by_direction(
+            probs,
+            engaged_idx=engaged_idx,
+            posterior_threshold=switch_posterior_threshold,
+        )
+        for direction, change_indices in change_idx_by_direction.items():
+            for event_idx, change_trial in enumerate(change_indices):
+                change_id = f"{subject}:{session}:{direction}:{event_idx}"
+                lo = max(0, int(change_trial) - int(window))
+                hi = min(len(group), int(change_trial) + int(window) + 1)
+                for row_idx in range(lo, hi):
+                    rel = int(row_idx - int(change_trial))
+                    p_engaged = float(probs[row_idx, engaged_idx])
+                    for state_idx, state_label, probability in (
+                        (engaged_idx, engaged_label, p_engaged),
+                        (non_engaged_idx, non_engaged_label, 1.0 - p_engaged),
+                    ):
+                        rows.append(
+                            {
+                                "subject": subject,
+                                "session": session,
+                                "change_id": change_id,
+                                "direction": direction,
+                                "relative_trial": rel,
+                                "state_idx": state_idx,
+                                "state_label": state_label,
+                                "probability": probability,
+                            }
+                        )
+    return {
+        "change_df": pd.DataFrame(
+            rows,
+            columns=[
+                "subject",
+                "session",
+                "change_id",
+                "direction",
+                "relative_trial",
+                "state_idx",
+                "state_label",
+                "probability",
+            ],
+        ),
+        "state_order": [engaged_label, non_engaged_label],
+        "directions": ["into_engaged", "out_of_engaged"],
+        "window": int(window),
         "title": title,
     }
 
@@ -869,35 +1090,101 @@ def build_state_dwell_times_payload(
     *,
     session_col: str = "session",
     sort_col: str = "trial_idx",
+    transition_matrices: dict | None = None,
+    views: dict | None = None,
+    max_dwell: int | None = None,
+    ci_level: float = 0.68,
+    bin_width: int = 10,
     title: str = "Dwell times",
 ) -> dict:
     """Prepare empirical MAP-state dwell lengths split at session boundaries."""
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
-    state_order, _, _ = _state_meta_from_trial_df(df)
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
     work = df.sort_values(["subject", session_col, sort_col]).copy()
     rows = []
     state_source = "state_idx" if "state_idx" in work.columns else "state_label"
     for (subject, session), group in work.groupby(["subject", session_col], observed=True):
         values = group[state_source].to_list()
         labels = group["state_label"].astype(str).to_list()
+        ranks = group["state_idx"].map(rank_by_idx).fillna(group.get("state_rank", 0)).to_list() if "state_idx" in group.columns else [None] * len(group)
         if not values:
             continue
         start = 0
         for idx in range(1, len(values) + 1):
             if idx == len(values) or values[idx] != values[start]:
+                state_idx_value = int(values[start]) if state_source == "state_idx" else None
                 rows.append(
                     {
                         "subject": subject,
                         "session": session,
+                        "state_idx": state_idx_value,
+                        "state_rank": rank_by_idx.get(state_idx_value, ranks[start]) if state_idx_value is not None else ranks[start],
                         "state_label": labels[start],
                         "dwell": idx - start,
                     }
                 )
                 start = idx
+    dwell_df = pd.DataFrame(rows)
+    if max_dwell is None:
+        if dwell_df.empty:
+            max_dwell = 1
+        else:
+            session_lengths = work.groupby(["subject", session_col], observed=True).size()
+            max_dwell = int(max(1, session_lengths.max()))
+
+    matrix_by_subject = dict(transition_matrices or {})
+    if views:
+        for subject, view in views.items():
+            matrix = _transition_matrix_from_view(view)
+            if matrix is not None:
+                matrix_by_subject[subject] = matrix
+
+    summary_rows = []
+    y_max = 0.0
+    for state_label in state_order:
+        state_rows = dwell_df[dwell_df["state_label"].astype(str) == state_label]
+        if state_rows.empty:
+            continue
+        state_idx_values = state_rows["state_idx"].dropna().astype(int).unique().tolist() if "state_idx" in state_rows.columns else []
+        state_idx = state_idx_values[0] if state_idx_values else None
+        dwell_lengths = state_rows["dwell"].to_numpy(dtype=int)
+        self_probs = []
+        if state_idx is not None:
+            for subject in pd.unique(state_rows["subject"]):
+                matrix = matrix_by_subject.get(subject)
+                if matrix is not None and state_idx < matrix.shape[0]:
+                    n_runs = int((state_rows["subject"] == subject).sum())
+                    self_probs.extend([float(matrix[state_idx, state_idx])] * max(1, n_runs))
+        self_prob = float(np.mean(self_probs)) if self_probs else None
+        centers, predicted, empirical, yerr = _binned_dwell_summary(
+            dwell_lengths,
+            max_dwell=int(max_dwell),
+            bin_width=int(bin_width),
+            ci_level=float(ci_level),
+            self_prob=self_prob,
+        )
+        for idx, center in enumerate(centers):
+            pred_value = float(predicted[idx]) if predicted is not None else np.nan
+            y_max = max(y_max, pred_value if np.isfinite(pred_value) else 0.0, float(empirical[idx] + yerr[1, idx]))
+            summary_rows.append(
+                {
+                    "state_label": state_label,
+                    "state_idx": state_idx,
+                    "bin_center": float(center),
+                    "predicted": pred_value,
+                    "empirical": float(empirical[idx]),
+                    "yerr_low": float(yerr[0, idx]),
+                    "yerr_high": float(yerr[1, idx]),
+                    "n_runs": int(dwell_lengths.size),
+                }
+            )
     return {
-        "dwell_df": pd.DataFrame(rows),
+        "dwell_df": dwell_df,
+        "dwell_summary_df": pd.DataFrame(summary_rows),
         "state_order": state_order,
+        "max_dwell": int(max_dwell),
+        "y_max": float(y_max if y_max > 0 else 1.0),
         "title": title,
     }
 
@@ -909,16 +1196,30 @@ def build_state_posterior_count_payload(
 ) -> dict:
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", "state_label"], name="trial_df")
-    state_order, _, _ = _state_meta_from_trial_df(df)
+    pcols = _posterior_cols(df)
+    if not pcols:
+        raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
     count_df = (
         df.groupby(["subject", "state_label"], observed=True)
         .size()
         .rename("n_trials")
         .reset_index()
     )
+    posterior_df = df.melt(
+        id_vars=["subject"],
+        value_vars=pcols,
+        var_name="state_col",
+        value_name="probability",
+    )
+    posterior_df["state_idx"] = posterior_df["state_col"].str.rsplit("_", n=1).str[-1].astype(int)
+    posterior_df["state_label"] = posterior_df["state_idx"].map(label_by_idx).fillna(posterior_df["state_col"])
+    posterior_df["state_rank"] = posterior_df["state_idx"].map(rank_by_idx).fillna(posterior_df["state_idx"]).astype(int)
     return {
         "count_df": count_df,
+        "posterior_df": posterior_df,
         "state_order": state_order,
+        "bins": 20,
         "title": title,
     }
 
@@ -931,6 +1232,11 @@ def build_session_deepdive_payload(
     session_col: str = "session",
     sort_col: str = "trial_idx",
     trace_cols: list[str] | None = None,
+    engaged_window: int = 20,
+    engaged_trace_mode: str = "rolling",
+    rolling_accuracy_window: int = 20,
+    chance_level: float | None = None,
+    num_classes: int | None = None,
     title: str | None = None,
 ) -> dict:
     """Prepare one session for ``plot_session_deepdive``."""
@@ -940,6 +1246,7 @@ def build_session_deepdive_payload(
     if not pcols:
         raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    engaged_idx = _infer_engaged_state_idx(label_by_idx, rank_by_idx)
     work = df[(df["subject"].astype(str) == str(subject)) & (df[session_col] == session)].copy()
     if work.empty:
         raise ValueError(f"No rows found for subject={subject!r}, session={session!r}.")
@@ -959,11 +1266,24 @@ def build_session_deepdive_payload(
     if "state_idx" in work.columns:
         values = work["state_idx"].to_numpy()
         change_trials = (np.flatnonzero(values[1:] != values[:-1]) + 1).astype(int).tolist()
+    if trace_cols is None:
+        default_trace_cols = ["A_plus", "A_minus", "A_L", "A_C", "A_R"]
+        trace_cols = [column for column in default_trace_cols if column in work.columns]
+    if num_classes is None and "response" in work.columns:
+        response_vals = pd.to_numeric(work["response"], errors="coerce").dropna()
+        if not response_vals.empty:
+            num_classes = int(response_vals.max()) + 1
     return {
         "trial_df": work,
         "posterior_df": posterior_df,
         "state_order": state_order,
         "change_trials": change_trials,
         "trace_cols": list(trace_cols or []),
-        "title": title or f"Subject {subject} - session {session}",
+        "engaged_state_label": label_by_idx.get(engaged_idx),
+        "engaged_window": int(engaged_window),
+        "engaged_trace_mode": engaged_trace_mode,
+        "rolling_accuracy_window": int(rolling_accuracy_window),
+        "chance_level": chance_level,
+        "num_classes": num_classes,
+        "title": title or f"Subject {subject} - session {session}  ({len(work)} trials, {len(change_trials)} state changes)",
     }

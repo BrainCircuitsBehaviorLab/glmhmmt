@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.22
+- Restored the legacy visual style for the new payload-based common model plots, including the session deep dive, change-triggered posteriors, state occupancy, posterior histograms, state accuracy, and dwell-time summaries.
+- Kept the strict postprocess/plot separation while enriching the plot payloads with the extra metadata needed for the original visual grammar: action traces, rolling accuracy, transition-derived dwell predictions, posterior histograms, and subject-level summaries.
+- Added `build_change_triggered_posteriors_payload(...)` and corrected engaged-to-disengaged / disengaged-to-engaged event extraction to use confident posterior `argmax` changes, preserving partial edge windows and plotting non-engaged probability as `1 - P(engaged)`.
+- Updated state accuracy payloads to include the pooled `All` condition and restored the project custom boxplot style with subject-connecting lines and percent accuracy.
+- Extended dwell-time payloads to support transition matrices or views during postprocessing, so plots can draw predicted-vs-empirical dwell curves without doing model-data preparation internally.
+- Added smoke and regression coverage for the common state/session plot payload contracts, including change-triggered posterior directionality.
+
+## 0.1.21
+- Split `glmhmmt.model_plots` into a thin public facade over smaller `glmhmmt.model_plotting` modules for emissions, transitions, sessions, states, and shared utilities.
+- Moved common model plot preparation into `glmhmmt.postprocess` payload builders, so common plots consume explicit DataFrames or payloads instead of `views` as their public contract.
+- Added payload builders for state accuracy, session trajectories, state occupancy, dwell times, posterior counts, and session deep dives, and exported them through the package lazy imports.
+- Preserved non-migrated plotting helpers through a legacy bridge while introducing the new DataFrame/payload API for emission weights, transition matrices, posterior/session diagnostics, occupancy, dwell, and state accuracy.
+- Made GLM fit configs store both requested and resolved emission columns, so downstream fitted-regressor resolution can use the actual expanded design matrix columns.
+- Hardened fitted-regressor source resolution with fallback reads from saved arrays when older configs do not include resolved emission columns.
+- Fixed multi-subject trial concatenation for subject-local one-hot feature columns by padding missing fitted feature columns with zeros before concatenation.
+- Added regression coverage for trial-frame alignment, plot payload builders, and the new emission-weight plotting signature.
+
 ## 0.1.20
 - Updated the model-manager widget to honor each task adapter's full `default_emission_cols(...)` list for GLM fits instead of truncating the preselected emission regressors to the first 10 columns.
 - Added regression coverage for the full-default widget path so task-owned custom emission defaults remain stable across widget refreshes.
