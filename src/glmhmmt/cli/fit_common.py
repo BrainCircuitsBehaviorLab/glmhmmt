@@ -46,6 +46,7 @@ def stable_model_id(
     emission_cols: list | None = None,
     transition_cols: list | None = None,
     frozen_emissions: dict | None = None,
+    baseline_class_idx: int = 0,
     cv_mode: str = "none",
     cv_repeats: int = 0,
 ) -> str:
@@ -59,6 +60,7 @@ def stable_model_id(
         "emission_cols": sorted(emission_cols) if emission_cols else [],
         "transition_cols": sorted(transition_cols) if transition_cols else [],
         "frozen_emissions": serialize_frozen_emissions(frozen_emissions),
+        "baseline_class_idx": int(baseline_class_idx),
         "cv_mode": cv_mode,
         "cv_repeats": cv_repeats,
     }

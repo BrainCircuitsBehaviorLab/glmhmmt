@@ -29,6 +29,7 @@ def fit_subject(
     restart_noise_scale: float = 0.05,
     seed: int = 0,
     progress_callback: ProgressCallback | None = None,
+    baseline_class_idx: int = 0,
 ) -> dict:
     """Fit a GLM (K=1) to a single subject."""
 
@@ -67,7 +68,8 @@ def fit_subject(
         "y": fit.y,
         "X": fit.X,
         "names": names,
-        "T": fit.num_trials
+        "T": fit.num_trials,
+        "baseline_class_idx": int(baseline_class_idx),
     }
 
 def save_results(result: dict, out_dir: Path, tau: float):
@@ -79,19 +81,12 @@ def save_results(result: dict, out_dir: Path, tau: float):
     # Save as {subj}_glm_arrays.npz
     prefix = out_dir / f"{subj}_glm"
     
-    # Prepare W for saving in glmhmm compatible format (K, C-1, M)
-    # result["W"] is (C, M) including the reference 0.
-    # We want to exclude the reference.
-    # For 3 classes (L, C, R), ref is C (idx 1). We want [L, R] -> indices [0, 2].
-    # For 2 classes (L, R), ref is R (idx 1). We want [L] -> index [0].
-    
     W_full = result["W"]
     C, M = W_full.shape
-    if C == 3:
-        W_save = W_full[[0, 2]]  # (2, M) — W_L and W_R, skip C=ref
-    else:
-        W_save = W_full[[0]]     # (1, M) — W_L (logit for P(Left)); R=ref(idx 1)=zeros
-    
+    baseline_class_idx = int(result.get("baseline_class_idx", 0))
+    if not 0 <= baseline_class_idx < C:
+        raise ValueError(f"baseline_class_idx={baseline_class_idx} is invalid for num_classes={C}.")
+    W_save = np.delete(W_full, baseline_class_idx, axis=0)
     W_save = W_save[None, ...] # (1, C-1, M)
 
     np.savez(
@@ -108,6 +103,7 @@ def save_results(result: dict, out_dir: Path, tau: float):
         lapse_rates=result.get("lapse_rates", np.zeros(C)),
         lapse_mode=result.get("lapse_mode", "none"),
         lapse_labels=np.asarray(result.get("lapse_labels", []), dtype=str),
+        baseline_class_idx=np.array(int(baseline_class_idx)),
         success=result["success"],
     )
 
@@ -129,7 +125,8 @@ def save_results(result: dict, out_dir: Path, tau: float):
         "bic": [bic],
         "acc": [acc],
         "k": [k],
-        "n_trials": [result["T"]]
+        "n_trials": [result["T"]],
+        "baseline_class_idx": [int(baseline_class_idx)],
     }).write_parquet(str(prefix) + "_metrics.parquet")
 
 
@@ -142,6 +139,7 @@ def generate_model_id(
     n_restarts: int = 5,
     restart_noise_scale: float = 0.05,
     seed: int | None = 0,
+    baseline_class_idx: int = 0,
 ):
     cols = sorted(emission_cols) if emission_cols else []
     config = {
@@ -149,6 +147,7 @@ def generate_model_id(
         "tau": float(tau),
         "emission_cols": cols,
         "lapse_mode": str(lapse_mode),
+        "baseline_class_idx": int(baseline_class_idx),
     }
     if lapse_mode != "none":
         config["lapse_max"] = float(lapse_max)
@@ -173,6 +172,7 @@ def main(
     seed: int = 0,
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
+    baseline_class_idx: int = 0,
 ):
     # Compute base output directory
     base_out_dir = get_results_dir() / "fits" / task / "glm"
@@ -188,6 +188,7 @@ def main(
         n_restarts=n_restarts,
         restart_noise_scale=restart_noise_scale,
         seed=seed,
+        baseline_class_idx=baseline_class_idx,
     )
     out_dirs = [base_out_dir / model_hash]
 
@@ -252,6 +253,7 @@ def main(
                     "n_restarts": n_restarts,
                     "restart_noise_scale": restart_noise_scale,
                     "seed": seed,
+                    "baseline_class_idx": int(baseline_class_idx),
                     "model_id": d.name,
                 },
                 f,
@@ -290,6 +292,7 @@ def main(
                 restart_noise_scale=restart_noise_scale,
                 seed=seed,
                 progress_callback=_progress if progress_callback is not None else None,
+                baseline_class_idx=baseline_class_idx,
             )
             for d in out_dirs:
                 save_results(res, d, tau)
@@ -327,6 +330,12 @@ if __name__ == "__main__":
                         help="Stddev of Gaussian noise added to each parameter at each lapse-fit restart")
     parser.add_argument("--seed", type=int, default=0,
                         help="Random seed for lapse-fit restart initialization noise")
+    parser.add_argument(
+        "--baseline_class_idx",
+        type=int,
+        default=0,
+        help="Choice class used as the implicit softmax reference.",
+    )
 
     args = parser.parse_args()
     configure_paths_from_args(args)
@@ -343,4 +352,5 @@ if __name__ == "__main__":
         n_restarts=args.n_restarts,
         restart_noise_scale=args.restart_noise_scale,
         seed=args.seed,
+        baseline_class_idx=args.baseline_class_idx,
     )

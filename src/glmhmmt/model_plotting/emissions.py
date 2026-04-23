@@ -249,20 +249,34 @@ def plot_emission_weights(weights_df, **kwargs) -> tuple[plt.Figure, plt.Figure]
     )
 
 
+def _default_binary_class_idx(weights_df) -> int | None:
+    df = to_pandas_df(weights_df, name="weights_df")
+    if "class_idx" not in df.columns:
+        return None
+    values = sorted({int(value) for value in pd.unique(df["class_idx"].dropna())})
+    if not values:
+        return None
+    return 0 if 0 in values else values[0]
+
+
 def plot_binary_emission_weights_by_subject(weights_df, *, K: int | None = None, **kwargs) -> plt.Figure:
-    return plot_emission_weights_by_subject(weights_df, K=K, class_idx=0, **kwargs)
+    class_idx = kwargs.pop("class_idx", _default_binary_class_idx(weights_df))
+    return plot_emission_weights_by_subject(weights_df, K=K, class_idx=class_idx, **kwargs)
 
 
 def plot_binary_emission_weights_summary_lineplot(weights_df, *, K: int | None = None, **kwargs) -> plt.Figure:
-    return plot_emission_weights_summary_lineplot(weights_df, K=K, class_idx=0, **kwargs)
+    class_idx = kwargs.pop("class_idx", _default_binary_class_idx(weights_df))
+    return plot_emission_weights_summary_lineplot(weights_df, K=K, class_idx=class_idx, **kwargs)
 
 
 def plot_binary_emission_weights_summary_boxplot(weights_df, *, K: int | None = None, **kwargs) -> plt.Figure:
-    return plot_emission_weights_summary_boxplot(weights_df, K=K, class_idx=0, **kwargs)
+    class_idx = kwargs.pop("class_idx", _default_binary_class_idx(weights_df))
+    return plot_emission_weights_summary_boxplot(weights_df, K=K, class_idx=class_idx, **kwargs)
 
 
 def plot_binary_emission_weights_summary(weights_df, *, K: int | None = None, **kwargs) -> plt.Figure:
-    return plot_emission_weights_summary(weights_df, K=K, class_idx=0, **kwargs)
+    class_idx = kwargs.pop("class_idx", _default_binary_class_idx(weights_df))
+    return plot_emission_weights_summary(weights_df, K=K, class_idx=class_idx, **kwargs)
 
 
 def plot_binary_emission_weights(weights_df, *, K: int | None = None, **kwargs) -> tuple[plt.Figure, plt.Figure]:

@@ -67,6 +67,7 @@ class TaskAdapter(ABC):
     task_key: str = NotImplemented      # canonical UI / CLI task name
     task_label: str = NotImplemented    # human-readable task label
     num_classes: int = NotImplemented   # 2 or 3
+    baseline_class_idx: int = 0          # implicit softmax reference class
     data_file: str = NotImplemented     # filename under the runtime dataset root
     sort_col: str = NotImplemented      # trial ordering column
     session_col: str = NotImplemented   # session identifier column

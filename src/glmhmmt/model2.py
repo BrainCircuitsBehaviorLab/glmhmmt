@@ -240,8 +240,7 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
             the adapter design-matrix build. **Required** when `frozen` is set.
         baseline_class_idx: Class index used as the softmax reference
             category. Its logit is fixed to zero and no explicit weight row is
-            learned for it. Explicit weight rows follow class-index order with
-            this class omitted. Default `0`.
+            learned for it. Default `0`.
         m_step_optimizer: Optimizer used in the gradient M-step.
             Default `optax.adam(1e-2)`.
         m_step_num_iters: Number of gradient steps per M-step call.
@@ -293,8 +292,8 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
         self.baseline_class_idx = int(baseline_class_idx)
         if not 0 <= self.baseline_class_idx < self.num_classes:
             raise ValueError(
-                f"baseline_class_idx must be in [0, {self.num_classes - 1}] "
-                f"for num_classes={self.num_classes}; got {baseline_class_idx}."
+                f"baseline_class_idx must be in [0, {self.num_classes - 1}] for num_classes={self.num_classes}; "
+                f"got {baseline_class_idx}."
             )
         if self.frozen and not self.emission_feature_names:
             raise ValueError(
@@ -350,11 +349,11 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
 
     def distribution(self, params, state, inputs):
         x = inputs[: self.emission_input_dim]  # (M,)
-        # eta: (C-1,) in class-index order, excluding the selected baseline.
+        # eta: (C-1,) — one contrast per non-base class in original class order,
+        # excluding the selected baseline class.
         eta = params.weights[state] @ x  # (C-1,)
 
-        # Insert the implicit reference class at its original class index.
-        zero = jnp.zeros(1, dtype=eta.dtype)
+        zero = jnp.zeros(1, dtype=jnp.float32)
         logits = jnp.concatenate(
             [
                 eta[: self.baseline_class_idx],
@@ -554,10 +553,7 @@ class SoftmaxGLMHMM(HMM):
         weight_scale: Standard deviation of the random normal weight initialisation for emission and transition weights.  Default `1.0`.
         frozen_emissions: Per-state emission feature freeze specification of the form `{state_idx: {feature_name: fixed_value}}`.  Feature names must appear in `emission_feature_names`; frozen entries are enforced by a bijector so they receive no gradient updates. Example: `{0: {"SL": 0.0, "SC": 0.0, "SR": 0.0}}`.
         emission_feature_names: Ordered names of the `X` columns — pass `names["X_cols"]` from the adapter design-matrix build. **Required** when `frozen_emissions` is set.
-        baseline_class_idx: Class index used as the softmax reference category.
-            Its logit is fixed to zero and no explicit weight row is learned
-            for it. Explicit weight rows follow class-index order with this
-            class omitted. Default `0`.
+        baseline_class_idx: Class index used as the softmax reference category. Its logit is fixed to zero and no explicit weight row is learned for it. Default `0`.
         m_step_optimizer: Optimizer shared by emission and transition M-steps. Default `optax.adam(1e-2)`.
         m_step_num_iters: Number of gradient steps per M-step call.Default `100`.
 
@@ -625,8 +621,8 @@ class SoftmaxGLMHMM(HMM):
         self.baseline_class_idx = int(baseline_class_idx)
         if not 0 <= self.baseline_class_idx < self.num_classes:
             raise ValueError(
-                f"baseline_class_idx must be in [0, {self.num_classes - 1}] "
-                f"for num_classes={self.num_classes}; got {baseline_class_idx}."
+                f"baseline_class_idx must be in [0, {self.num_classes - 1}] for num_classes={self.num_classes}; "
+                f"got {baseline_class_idx}."
             )
 
         initial_component = StandardHMMInitialState(num_states, initial_probs_concentration=initial_probs_concentration)

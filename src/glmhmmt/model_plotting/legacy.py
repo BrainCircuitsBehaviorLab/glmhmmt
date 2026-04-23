@@ -1458,7 +1458,9 @@ def _binary_emission_plot_df(
         return df, [], [], {}
 
     if "class_idx" in df.columns:
-        df = df[df["class_idx"] == 0].copy()
+        class_values = sorted({int(value) for value in pd.unique(df["class_idx"].dropna())})
+        selected_class = 0 if 0 in class_values else (class_values[0] if class_values else 0)
+        df = df[df["class_idx"] == selected_class].copy()
     if df.empty:
         return df, [], [], {}
 

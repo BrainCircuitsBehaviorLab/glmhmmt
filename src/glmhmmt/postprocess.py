@@ -23,7 +23,7 @@ import numpy as np
 import polars as pl
 from glmhmmt.tasks import TaskAdapter
 
-from glmhmmt.views import SubjectFitView, _LABEL_RANK, get_state_color
+from glmhmmt.views import SubjectFitView, _LABEL_RANK, explicit_class_indices, get_state_color
 
 try:
     import pandas as pd
@@ -43,6 +43,7 @@ def _emission_probs(
     X: np.ndarray,  # (T, F)
     map_k: np.ndarray,  # (T,) int — MAP state per trial
     C: int,
+    baseline_class_idx: int = 0,
 ) -> np.ndarray:
     """Return MAP-state emission probabilities: softmax(W[map_k[t]] @ X[t]).
 
@@ -52,23 +53,30 @@ def _emission_probs(
     """
     W_map = W[map_k]  # (T, C-1, F)
     logits_ce = np.einsum("tcf,tf->tc", W_map, X)  # (T, C-1)
-    logits_map = _insert_reference(logits_ce, C)  # (T, C)
+    logits_map = _insert_reference(logits_ce, C, baseline_class_idx)  # (T, C)
     return _stable_softmax(logits_map)  # (T, C)
 
 
-def _insert_reference(logits_ce: np.ndarray, C: int) -> np.ndarray:
+def _insert_reference(logits_ce: np.ndarray, C: int, baseline_class_idx: int = 0) -> np.ndarray:
     """Insert the reference class (logit = 0) into a (*, C-1) array → (*, C).
 
     Convention
     ----------
-    The model always appends the reference class last
-    (SoftmaxGLMHMMEmissions: ``logits = [eta..., 0]``).
-
-    * C == 2 (binary): logits_ce = [logit_L]           →  [logit_L, 0]
-    * C == 3 (3-AFC):  logits_ce = [logit_L, logit_C]  →  [logit_L, logit_C, 0_R]
+    ``baseline_class_idx`` is the class whose logit is fixed to zero.
+    Explicit rows follow class-index order with that class omitted.
     """
+    baseline = int(baseline_class_idx)
+    if not 0 <= baseline < int(C):
+        raise ValueError(f"baseline_class_idx={baseline} is invalid for C={C}.")
     shape_prefix = logits_ce.shape[:-1]
-    return np.concatenate([logits_ce, np.zeros((*shape_prefix, 1))], axis=-1)
+    return np.concatenate(
+        [
+            logits_ce[..., :baseline],
+            np.zeros((*shape_prefix, 1), dtype=logits_ce.dtype),
+            logits_ce[..., baseline:],
+        ],
+        axis=-1,
+    )
 
 
 def _stable_softmax(logits: np.ndarray) -> np.ndarray:
@@ -191,7 +199,13 @@ def build_trial_df(
     p_state_conditional = view.state_conditional_probs()  # (T, K, C)
 
     # ── MAP-state emission probabilities ──────────────────────────────────────
-    p_map = _emission_probs(view.emission_weights, view.X, map_k, C)  # (T, C)
+    p_map = _emission_probs(
+        view.emission_weights,
+        view.X,
+        map_k,
+        C,
+        baseline_class_idx=view.baseline_class_idx,
+    )  # (T, C)
 
     correct_class = adapter.get_correct_class(df_out)
     if np.any((correct_class < 0) | (correct_class >= C)):
@@ -277,15 +291,17 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
 
     Columns
     -------
-    subject, state_idx, state_label, state_rank, class_idx, feature, weight
+    subject, state_idx, state_label, state_rank, class_idx, weight_row_idx,
+    baseline_class_idx, feature, weight
     """
     records: list[dict] = []
     for subj, view in views.items():
         W = view.emission_weights  # (K, C-1, F)
+        class_indices = explicit_class_indices(view.num_classes, view.baseline_class_idx)
         for k in range(view.K):
             lbl = view.state_name_by_idx.get(k, f"State {k}")
             rank = view.state_rank_by_idx.get(k, k)
-            for c in range(W.shape[1]):
+            for row_idx, class_idx in enumerate(class_indices):
                 for fi, fname in enumerate(view.feat_names):
                     records.append(
                         {
@@ -293,9 +309,11 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
                             "state_idx": k,
                             "state_label": lbl,
                             "state_rank": rank,
-                            "class_idx": c,
+                            "class_idx": int(class_idx),
+                            "weight_row_idx": int(row_idx),
+                            "baseline_class_idx": int(view.baseline_class_idx),
                             "feature": fname,
-                            "weight": float(W[k, c, fi]),
+                            "weight": float(W[k, row_idx, fi]),
                         }
                     )
     if not records:
@@ -412,7 +430,10 @@ def _weights_boxplot_payload_from_frame(
         }
 
     if "class_idx" in df.columns:
-        df = df.filter(pl.col("class_idx") == 0)
+        class_values = sorted(int(value) for value in df["class_idx"].unique().to_list())
+        if class_values:
+            selected_class = 0 if 0 in class_values else class_values[0]
+            df = df.filter(pl.col("class_idx") == selected_class)
     if df.is_empty():
         return {
             "values_by_state_feature": [],

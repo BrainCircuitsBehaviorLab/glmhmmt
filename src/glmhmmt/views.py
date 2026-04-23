@@ -109,6 +109,28 @@ def build_state_palette(
     return palette, ordered
 
 
+def explicit_class_indices(num_classes: int, baseline_class_idx: int) -> list[int]:
+    """Return explicit softmax weight class indices in stored row order."""
+    baseline = int(baseline_class_idx)
+    return [idx for idx in range(int(num_classes)) if idx != baseline]
+
+
+def _insert_reference_logit(logits_without_baseline: np.ndarray, baseline_class_idx: int) -> np.ndarray:
+    """Insert a zero logit at ``baseline_class_idx`` along the last axis."""
+    logits_ce = np.asarray(logits_without_baseline)
+    shape_prefix = logits_ce.shape[:-1]
+    zero = np.zeros((*shape_prefix, 1), dtype=logits_ce.dtype)
+    baseline = int(baseline_class_idx)
+    return np.concatenate(
+        [
+            logits_ce[..., :baseline],
+            zero,
+            logits_ce[..., baseline:],
+        ],
+        axis=-1,
+    )
+
+
 # ── dataclass ─────────────────────────────────────────────────────────────────
 
 
@@ -170,6 +192,11 @@ class SubjectFitView:
         Transition design matrix, shape ``(T, D)`` — GLM-HMM-t only.
     U_cols :
         Transition feature names, length ``D``.
+    baseline_class_idx :
+        Choice class used as the implicit softmax reference. The stored
+        ``emission_weights`` rows are aligned to class-index order with this
+        class omitted. New fits default to ``0``; legacy saved fits without
+        explicit metadata are handled in :func:`build_views`.
     """
 
     subject: str
@@ -194,6 +221,7 @@ class SubjectFitView:
     transition_weights: Optional[np.ndarray] = None  # (K, K, D)
     U: Optional[np.ndarray] = None  # (T, D)
     U_cols: list[str] = field(default_factory=list)
+    baseline_class_idx: int = 0
 
     # ── derived helpers ───────────────────────────────────────────────────────
 
@@ -206,6 +234,11 @@ class SubjectFitView:
     def num_classes(self) -> int:
         """Number of choice classes (C)."""
         return self.emission_weights.shape[1] + 1  # C-1 rows + reference class
+
+    @property
+    def stored_class_indices(self) -> list[int]:
+        """Choice class represented by each stored emission-weight row."""
+        return explicit_class_indices(self.num_classes, self.baseline_class_idx)
 
     def map_states(self) -> np.ndarray:
         """Return MAP state assignment ``(T,)`` = argmax(smoothed_probs, axis=1)."""
@@ -228,8 +261,7 @@ class SubjectFitView:
         predictions within a latent state.
         """
         logits_ce = np.einsum("kcf,tf->tkc", self.emission_weights, self.X)  # (T, K, C-1)
-        zeros = np.zeros((self.T, self.K, 1), dtype=logits_ce.dtype)
-        logits = np.concatenate([logits_ce, zeros], axis=-1)  # (T, K, C)
+        logits = _insert_reference_logit(logits_ce, self.baseline_class_idx)  # (T, K, C)
         logits = logits - logits.max(axis=-1, keepdims=True)
         exp_logits = np.exp(logits)
         return exp_logits / exp_logits.sum(axis=-1, keepdims=True)
@@ -285,6 +317,20 @@ def build_views(
         d = arrays_store[subj]
         feat_names = list(d.get("X_cols", []))
         _W = np.asarray(d["emission_weights"])
+        C = int(_W.shape[1] + 1)
+        if "baseline_class_idx" in d:
+            baseline_class_idx = int(np.asarray(d["baseline_class_idx"]).reshape(()))
+        else:
+            # Backward compatibility for fits saved before selectable baselines:
+            # old GLM-HMM exports used the last class as reference; old
+            # single-state GLM 3-class exports used the center class and carry
+            # lapse metadata.
+            baseline_class_idx = 1 if C == 3 and "lapse_mode" in d else C - 1
+        if not 0 <= baseline_class_idx < C:
+            raise ValueError(
+                f"Subject {subj!r}: baseline_class_idx={baseline_class_idx} "
+                f"is invalid for {C} classes."
+            )
         feat_names = feat_names[: _W.shape[2]]
         slbls = state_labels.get(subj, {k: f"State {k}" for k in range(K)})
         sorder = state_order.get(subj, list(range(K)))
@@ -333,6 +379,7 @@ def build_views(
             transition_weights=transition_weights,
             U=np.asarray(d["U"]) if "U" in d else None,
             U_cols=u_cols,
+            baseline_class_idx=baseline_class_idx,
         )
 
     return views

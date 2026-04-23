@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.1
+- Added configurable `baseline_class_idx` support across GLM-HMM / GLM-HMMT fits, saved arrays, views, and postprocessing so the implicit softmax reference class no longer has to be the last class.
+
 ## 0.1.24
 - Added summary and by-subject variants for the occupàncy plots.
 

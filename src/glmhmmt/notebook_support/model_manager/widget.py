@@ -75,7 +75,8 @@ def _build_2afc_emission_groups(available_cols: list[str]) -> list[dict]:
 
 
 def _build_mcdr_emission_groups(available_cols: list[str]) -> list[dict]:
-    return get_adapter("MCDR").build_emission_groups(list(available_cols))
+    groups = get_adapter("MCDR").build_emission_groups(list(available_cols))
+    return [group for group in groups if group.get("key") not in {"stim1", "stim2", "stim3", "stim4", "stim_hot"}]
 
 
 def _count_fitted_subjects(model_dir: Path) -> int:
@@ -123,6 +124,8 @@ def _summarize_selected_regressors(selected_cols: list[str], groups: list[dict])
     for group in groups:
         members = list(group.get("toggle_members") or group.get("members", {}).values())
         if not members:
+            continue
+        if all(member in consumed for member in members):
             continue
         if all(member in selected_set for member in members):
             summary.append(str(group.get("key", group.get("label", ""))))

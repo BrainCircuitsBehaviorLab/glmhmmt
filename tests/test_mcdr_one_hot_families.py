@@ -18,6 +18,11 @@ def mcdr_module(monkeypatch):
     return module
 
 
+def test_mcdr_adapter_uses_center_class_as_baseline(mcdr_module):
+    adapter = mcdr_module.MCDRAdapter()
+    assert adapter.baseline_class_idx == 1
+
+
 def test_mcdr_build_feature_df_adds_session_bias_choice_lags_and_params(mcdr_module):
     adapter = mcdr_module.MCDRAdapter()
     df_sub = pl.DataFrame(

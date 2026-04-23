@@ -34,3 +34,23 @@ def test_binary_emission_summary_boxplot_accepts_weights_df_and_feature_labels()
 
     assert xticks == ["Bias", "Stimulus"]
     assert legend_labels == ["Disengaged", "Engaged"]
+
+
+def test_binary_emission_summary_uses_only_available_nonbaseline_class():
+    weights_df = pd.DataFrame(
+        {
+            "subject": ["mouse-1", "mouse-1"],
+            "state_label": ["Disengaged", "Engaged"],
+            "state_rank": [1, 0],
+            "class_idx": [1, 1],
+            "weight_row_idx": [0, 0],
+            "baseline_class_idx": [0, 0],
+            "feature": ["stim_vals", "stim_vals"],
+            "weight": [2.0, 3.0],
+        }
+    )
+
+    fig = plot_binary_emission_weights_summary_boxplot(weights_df, K=2)
+
+    ax = fig.axes[0]
+    assert [tick.get_text() for tick in ax.get_xticklabels()] == ["stim_vals"]

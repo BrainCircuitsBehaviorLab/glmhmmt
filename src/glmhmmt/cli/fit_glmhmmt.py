@@ -32,6 +32,7 @@ def generate_model_id(
     emission_cols: list | None = None,
     transition_cols: list | None = None,
     frozen_emissions: dict | None = None,
+    baseline_class_idx: int = 0,
     cv_mode: str = "none",
     cv_repeats: int = 0,
 ) -> str:
@@ -43,6 +44,7 @@ def generate_model_id(
         emission_cols=emission_cols,
         transition_cols=transition_cols,
         frozen_emissions=frozen_emissions,
+        baseline_class_idx=baseline_class_idx,
         cv_mode=cv_mode,
         cv_repeats=cv_repeats,
     )
@@ -91,6 +93,7 @@ def _build_model(
     stickiness: float,
     frozen: dict | None,
     names: dict[str, Any],
+    baseline_class_idx: int = 0,
 ) -> SoftmaxGLMHMM:
     return SoftmaxGLMHMM(
         num_states=K,
@@ -101,6 +104,7 @@ def _build_model(
         transition_matrix_stickiness=stickiness,
         frozen_emissions=frozen or None,
         emission_feature_names=names.get("X_cols", []),
+        baseline_class_idx=baseline_class_idx,
     )
 
 def fit_subject(
@@ -118,6 +122,7 @@ def fit_subject(
     task: str = "MCDR",
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
+    baseline_class_idx: int = 0,
 ) -> dict:
     adapter, feature_df = _load_subject_feature_df(subject, task, tau)
     y, X, U, session_ids, names = _prepare_arrays(
@@ -138,6 +143,7 @@ def fit_subject(
         stickiness,
         frozen,
         names,
+        baseline_class_idx=baseline_class_idx,
     )
     best_params, best_lps, best_restart = fit_best_restart(
         model,
@@ -187,6 +193,7 @@ def fit_subject(
         "X": np.asarray(X),
         "U": np.asarray(U),
         "frozen_emissions": serialize_frozen_emissions(frozen),
+        "baseline_class_idx": int(baseline_class_idx),
         "cv_mode": "none",
         "cv_repeats": 0,
     }
@@ -208,6 +215,7 @@ def fit_subject_cv(
     task: str = "2AFC",
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
+    baseline_class_idx: int = 0,
 ) -> dict:
     adapter, feature_df = _load_subject_feature_df(subject, task, tau)
     frozen = normalize_frozen_emissions(frozen_emissions)
@@ -266,6 +274,7 @@ def fit_subject_cv(
             stickiness,
             frozen,
             names,
+            baseline_class_idx=baseline_class_idx,
         )
         best_params, best_lps, best_restart = fit_best_restart(
             model,
@@ -386,6 +395,7 @@ def fit_subject_cv(
         "X": np.asarray(X_full),
         "U": np.asarray(U_full),
         "frozen_emissions": serialize_frozen_emissions(frozen),
+        "baseline_class_idx": int(baseline_class_idx),
         "cv_mode": "balanced_session_holdout",
         "cv_repeats": n_folds,
     }
@@ -438,6 +448,7 @@ def save_results(result: dict, out_dir: Path) -> None:
         X_cols=np.array(result["names"].get("X_cols", []), dtype=object),
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
+        baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
     )
 
 
@@ -502,6 +513,7 @@ def save_cv_results(result: dict, out_dir: Path) -> None:
         X_cols=np.array(result["names"].get("X_cols", []), dtype=object),
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
+        baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
         cv_selected_repeat=np.array(int(result["best_repeat_index"])),
         cv_selected_metric=np.array(float(result["best_repeat_test_ll_per_trial"])),
     )
@@ -523,6 +535,7 @@ def main(
     cv_repeats: int = 0,
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
+    baseline_class_idx: int = 0,
 ):
     adapter = get_adapter(task)
     cv_mode = normalize_cv_mode(cv_mode)
@@ -541,6 +554,7 @@ def main(
             emission_cols=resolved_emission_cols,
             transition_cols=transition_cols or adapter.default_transition_cols(),
             frozen_emissions=frozen_spec,
+            baseline_class_idx=baseline_class_idx,
             cv_mode=cv_mode,
             cv_repeats=cv_repeats,
         )
@@ -555,6 +569,7 @@ def main(
                 "emission_cols": resolved_emission_cols,
                 "transition_cols": transition_cols or adapter.default_transition_cols(),
                 "frozen_emissions": frozen_spec,
+                "baseline_class_idx": int(baseline_class_idx),
                 "K_list": K_list,
                 "model_id": out_dir.name,
                 "cv_mode": cv_mode,
@@ -601,6 +616,7 @@ def main(
                     emission_cols=emission_cols,
                     transition_cols=transition_cols,
                     frozen_emissions=frozen_spec,
+                    baseline_class_idx=baseline_class_idx,
                     tau=tau,
                     task=task,
                     verbose=verbose,
@@ -617,6 +633,7 @@ def main(
                     emission_cols=emission_cols,
                     transition_cols=transition_cols,
                     frozen_emissions=frozen_spec,
+                    baseline_class_idx=baseline_class_idx,
                     tau=tau,
                     task=task,
                     verbose=verbose,
@@ -653,6 +670,12 @@ if __name__ == "__main__":
         default=None,
         help='JSON object mapping state indices to {feature: fixed_value}, e.g. \'{"0":{"SL":0.0}}\'.',
     )
+    parser.add_argument(
+        "--baseline_class_idx",
+        type=int,
+        default=0,
+        help="Choice class used as the implicit softmax reference.",
+    )
     args = parser.parse_args()
     configure_paths_from_args(args)
     frozen_emissions = json.loads(args.frozen_emissions) if args.frozen_emissions else None
@@ -670,4 +693,5 @@ if __name__ == "__main__":
         task=args.task,
         cv_mode=args.cv_mode,
         cv_repeats=args.cv_repeats,
+        baseline_class_idx=args.baseline_class_idx,
     )
