@@ -6,7 +6,7 @@ from typing import Any, Callable
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize
-from scipy.special import expit, softmax
+from scipy.special import softmax
 
 
 LAPSE_MODES = {"none", "class", "history", "history_conditioned"}
@@ -71,6 +71,15 @@ def _validate_glm_inputs(
         )
 
     return X_np, y_np, resolved_num_classes
+
+
+def _validate_baseline_class_idx(num_classes: int, baseline_class_idx: int) -> int:
+    baseline = int(baseline_class_idx)
+    if not 0 <= baseline < int(num_classes):
+        raise ValueError(
+            f"baseline_class_idx must be in [0, {int(num_classes) - 1}]; got {baseline}."
+        )
+    return baseline
 
 
 def _normalize_lapse_mode(lapse_mode: str | None, lapse: bool | None) -> str:
@@ -139,22 +148,34 @@ def _project_lapse_params(
     return projected
 
 
-def _base_logits(X_np: np.ndarray, w_flat_w: np.ndarray, num_classes: int) -> np.ndarray:
+def _base_logits(
+    X_np: np.ndarray,
+    w_flat_w: np.ndarray,
+    num_classes: int,
+    baseline_class_idx: int,
+) -> np.ndarray:
     T, M = X_np.shape
     W_pair = w_flat_w.reshape(num_classes - 1, M)
-    if num_classes == 3:
-        return np.stack([X_np @ W_pair[0], np.zeros(T), X_np @ W_pair[1]], axis=1)
-    if num_classes == 2:
-        return np.stack([-(X_np @ W_pair[0]), np.zeros(T)], axis=1)
-    return np.concatenate([X_np @ W_pair.T, np.zeros((T, 1))], axis=1)
+    logits_without_baseline = X_np @ W_pair.T
+    zero = np.zeros((T, 1), dtype=logits_without_baseline.dtype)
+    baseline = int(baseline_class_idx)
+    return np.concatenate(
+        [
+            logits_without_baseline[:, :baseline],
+            zero,
+            logits_without_baseline[:, baseline:],
+        ],
+        axis=1,
+    )
 
 
-def _base_predictive_probs(X_np: np.ndarray, w_flat_w: np.ndarray, num_classes: int) -> np.ndarray:
-    if num_classes == 2:
-        W_pair = w_flat_w.reshape(num_classes - 1, X_np.shape[1])
-        p_right = expit(-(X_np @ W_pair[0]))
-        return np.stack([1.0 - p_right, p_right], axis=1)
-    return softmax(_base_logits(X_np, w_flat_w, num_classes), axis=1)
+def _base_predictive_probs(
+    X_np: np.ndarray,
+    w_flat_w: np.ndarray,
+    num_classes: int,
+    baseline_class_idx: int,
+) -> np.ndarray:
+    return softmax(_base_logits(X_np, w_flat_w, num_classes, baseline_class_idx), axis=1)
 
 
 def _history_repeat_targets(
@@ -241,6 +262,7 @@ def fit_glm(
     y: ArrayLike,
     *,
     num_classes: int | None = None,
+    baseline_class_idx: int = 0,
     lapse_mode: str | None = None,
     lapse: bool | None = None,
     lapse_max: float = 0.2,
@@ -254,6 +276,7 @@ def fit_glm(
     """Fit a single-state GLM model directly from arrays."""
 
     X_np, y_np, num_classes = _validate_glm_inputs(X, y, num_classes=num_classes)
+    baseline_class_idx = _validate_baseline_class_idx(num_classes, baseline_class_idx)
     T, M = X_np.shape
 
     lapse_mode = _normalize_lapse_mode(lapse_mode, lapse)
@@ -287,7 +310,12 @@ def fit_glm(
         else:
             w_flat_w = w_flat
             lapse_rates_local = np.zeros(lapse_size, dtype=float)
-        base_probs = _base_predictive_probs(X_np, w_flat_w, num_classes)
+        base_probs = _base_predictive_probs(
+            X_np,
+            w_flat_w,
+            num_classes,
+            baseline_class_idx,
+        )
         probs = _apply_lapse_mode(
             base_probs,
             y_np,
@@ -342,6 +370,7 @@ def fit_glm(
                 X_np,
                 y_np,
                 num_classes=num_classes,
+                baseline_class_idx=baseline_class_idx,
                 lapse_mode="none",
                 lapse_max=lapse_max,
                 n_restarts=1,
@@ -352,7 +381,12 @@ def fit_glm(
                 progress_callback=None,
             )
             if weight_dim > 0:
-                base_x0[:weight_dim] = warm_start.weights[:-1].reshape(-1)
+                explicit_weights = np.delete(
+                    warm_start.weights,
+                    baseline_class_idx,
+                    axis=0,
+                )
+                base_x0[:weight_dim] = explicit_weights.reshape(-1)
     else:
         bounds = None
         x0 = np.zeros(n_params, dtype=float)
@@ -466,14 +500,22 @@ def fit_glm(
         w_flat_w = w_flat
 
     W_pair = w_flat_w.reshape(num_classes - 1, M)
-    if num_classes == 3:
-        weights = np.stack([W_pair[0], np.zeros(M), W_pair[1]], axis=0)
-    elif num_classes == 2:
-        weights = np.stack([W_pair[0], np.zeros(M)], axis=0)
-    else:
-        weights = np.concatenate([W_pair, np.zeros((1, M))], axis=0)
+    zero_row = np.zeros((1, M), dtype=W_pair.dtype)
+    weights = np.concatenate(
+        [
+            W_pair[:baseline_class_idx],
+            zero_row,
+            W_pair[baseline_class_idx:],
+        ],
+        axis=0,
+    )
 
-    base_probs = _base_predictive_probs(X_np, w_flat_w, num_classes)
+    base_probs = _base_predictive_probs(
+        X_np,
+        w_flat_w,
+        num_classes,
+        baseline_class_idx,
+    )
     predictive_probs = _apply_lapse_mode(
         base_probs,
         y_np,

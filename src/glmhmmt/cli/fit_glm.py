@@ -48,6 +48,7 @@ def fit_subject(
         X,
         y,
         num_classes=num_classes,
+        baseline_class_idx=baseline_class_idx,
         lapse_mode=lapse_mode,
         lapse_max=lapse_max,
         n_restarts=n_restarts,
