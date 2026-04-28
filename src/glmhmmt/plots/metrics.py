@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence, Tuple
+from collections.abc import Sequence
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np

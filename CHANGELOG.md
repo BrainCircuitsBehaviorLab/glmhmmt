@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.4
+- Fixed Tuple import
+
 ## 0.2.3
 - Big plot refactor for ease of use.
 
