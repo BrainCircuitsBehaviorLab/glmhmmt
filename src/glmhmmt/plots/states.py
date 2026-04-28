@@ -70,13 +70,14 @@ def _plot_session_violin(ax: plt.Axes, grouped_vals: list[np.ndarray], labels: l
     ax.set_ylim(0, 1)
 
 
-def _plot_switch_hist(ax: plt.Axes, switches: np.ndarray, title: str) -> None:
+def _plot_switch_hist(ax: plt.Axes, switches: np.ndarray, title: str | None = None) -> None:
     xlabel = "# state switches / session"
     switches = np.asarray(switches, dtype=float)
     switches = switches[np.isfinite(switches)]
+    if title is not None:
+        ax.set_title(title)
     if switches.size == 0:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        ax.set_title(title)
         ax.set_xlabel(xlabel)
         return
     max_switches = int(np.nanmax(switches))
@@ -92,7 +93,6 @@ def _plot_switch_hist(ax: plt.Axes, switches: np.ndarray, title: str) -> None:
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xlabel(xlabel)
     ax.set_ylabel("# sessions")
-    ax.set_title(title)
 
 
 def _state_accuracy_components(payload: dict) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
@@ -780,7 +780,7 @@ def change_triggered_posteriors_summary(
         n_panels=n_panels,
         nrows=1,
         ncols=len(directions),
-        figsize=figsize or (4.0 * n_panels, 4.0),
+        figsize=figsize or (6.0 * n_panels, 4.0),
     )
 
     subject_means = (
@@ -866,9 +866,9 @@ def change_triggered_posteriors_by_subject(
     fig, axes_array, created_fig = resolve_axes_grid(
         axes=axes,
         n_panels=n_panels,
-        nrows=1,
+        nrows=len(subjects),
         ncols=len(directions),
-        figsize=figsize or (4.0 * n_panels, 4.0),
+        figsize=figsize or (6.0 * n_panels, 4.0),
     )
 
     for row_idx, subject in enumerate(subjects):

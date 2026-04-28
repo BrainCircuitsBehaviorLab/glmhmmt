@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.5
+- Minor fixes in plotting module.
+
 ## 0.2.4
 - Fixed Tuple import
 
