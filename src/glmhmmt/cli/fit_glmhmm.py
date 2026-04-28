@@ -49,28 +49,25 @@ def generate_model_id(
         "cv_mode": normalize_cv_mode(cv_mode),
         "cv_repeats": int(cv_repeats) if normalize_cv_mode(cv_mode) != "none" else 0,
     }
-    if str(task).upper() == "2AFC_DRUG":
+    if get_adapter(task).condition_filter_options():
         base_config["condition_filter"] = _normalize_condition_filter(task, condition_filter)
     return hashlib.md5(json.dumps(base_config, sort_keys=True).encode()).hexdigest()[:8]
 
 
 def _normalize_condition_filter(task: str, condition_filter: str | None) -> str:
-    if str(task).upper() != "2AFC_DRUG":
+    options = get_adapter(task).condition_filter_options()
+    if not options:
         return "all"
     value = str(condition_filter or "all").strip().lower()
-    return value if value in {"all", "saline", "drug"} else "all"
+    return value if value in options else "all"
 
 
 def _filter_condition_df(df: pl.DataFrame, task: str, condition_filter: str | None) -> pl.DataFrame:
-    selected = _normalize_condition_filter(task, condition_filter)
-    if selected == "all" or df.is_empty():
+    if df.is_empty():
         return df
-    if "Drug" not in df.columns:
-        raise ValueError("2AFC_DRUG requires a 'Drug' column for condition filtering.")
-    target = 1 if selected == "drug" else 0
-    return (
-        df.filter(pl.col("Drug") == target)
-    )
+    adapter = get_adapter(task)
+    selected = _normalize_condition_filter(task, condition_filter)
+    return adapter.filter_condition_df(df, selected)
 
 
 def _load_subject_feature_df(subject: str, task: str, tau: float, condition_filter: str = "all") -> tuple[Any, pl.DataFrame]:

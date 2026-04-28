@@ -186,6 +186,56 @@ def test_fit_glm_empty_dataset_returns_zero_lapse_shape():
     assert fit.predictive_probs.shape == (0, 3)
 
 
+def test_fit_glm_uses_requested_binary_baseline_class(monkeypatch):
+    monkeypatch.setattr(
+        "glmhmmt.glm.minimize",
+        _mock_minimize_factory([np.array([2.0])]),
+    )
+
+    X = np.array([[1.0], [-1.0]], dtype=float)
+    y = np.array([1, 0], dtype=int)
+    fit = fit_glm(
+        X,
+        y,
+        num_classes=2,
+        baseline_class_idx=0,
+        n_restarts=1,
+        restart_noise_scale=0.0,
+    )
+
+    np.testing.assert_allclose(fit.weights, np.array([[0.0], [2.0]]))
+    expected = np.array(
+        [
+            [1.0 / (1.0 + np.exp(2.0)), np.exp(2.0) / (1.0 + np.exp(2.0))],
+            [np.exp(2.0) / (1.0 + np.exp(2.0)), 1.0 / (1.0 + np.exp(2.0))],
+        ]
+    )
+    np.testing.assert_allclose(fit.predictive_probs, expected)
+
+
+def test_fit_glm_uses_requested_middle_baseline_class(monkeypatch):
+    monkeypatch.setattr(
+        "glmhmmt.glm.minimize",
+        _mock_minimize_factory([np.array([1.5, -0.5])]),
+    )
+
+    X = np.array([[2.0], [0.0]], dtype=float)
+    y = np.array([0, 2], dtype=int)
+    fit = fit_glm(
+        X,
+        y,
+        num_classes=3,
+        baseline_class_idx=1,
+        n_restarts=1,
+        restart_noise_scale=0.0,
+    )
+
+    np.testing.assert_allclose(fit.weights, np.array([[1.5], [0.0], [-0.5]]))
+    logits = np.array([[3.0, 0.0, -1.0], [0.0, 0.0, 0.0]])
+    expected = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+    np.testing.assert_allclose(fit.predictive_probs, expected)
+
+
 def test_save_results_persists_lapse_metadata_and_counts_params(tmp_path):
     result = {
         "subject": "mouse-1",

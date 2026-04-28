@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+- Big plot refactor for ease of use.
+
+## 0.2.2
+- Added the `baseline_class_idx` support to GLM's.
+
 ## 0.2.1
 - Added configurable `baseline_class_idx` support across GLM-HMM / GLM-HMMT fits, saved arrays, views, and postprocessing so the implicit softmax reference class no longer has to be the last class.
 

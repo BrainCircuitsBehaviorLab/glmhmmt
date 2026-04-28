@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-from glmhmmt.plots_common import custom_boxplot
-from glmhmmt.model_plotting.utils import require_columns, resolve_state_order, state_palette, to_pandas_df
+from glmhmmt.plots.common import custom_boxplot, resolve_axes_grid, resolve_single_axis
+from glmhmmt.plots.utils import require_columns, resolve_state_order, state_palette, to_pandas_df
 
 
 def _line_sem(values: pd.Series) -> float:
@@ -94,7 +95,7 @@ def _plot_switch_hist(ax: plt.Axes, switches: np.ndarray, title: str) -> None:
     ax.set_title(title)
 
 
-def plot_state_accuracy(payload: dict) -> tuple[plt.Figure, pd.DataFrame]:
+def _state_accuracy_components(payload: dict) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
     accuracy_df = to_pandas_df(payload.get("accuracy_df"), name="accuracy_df")
     require_columns(accuracy_df, ["subject", "state_label", "accuracy", "n_trials"], name="accuracy_df")
     if accuracy_df.empty:
@@ -109,14 +110,36 @@ def plot_state_accuracy(payload: dict) -> tuple[plt.Figure, pd.DataFrame]:
     work["accuracy_pct"] = pd.to_numeric(work["accuracy"], errors="coerce")
     if work["accuracy_pct"].max(skipna=True) <= 1.0:
         work["accuracy_pct"] *= 100.0
+    return work, states, palette
 
-    grouped_acc = _grouped_values(work, label_col="state_label", value_col="accuracy_pct", labels=states)
+
+# def summarize_state_accuracy(payload: dict) -> pd.DataFrame:
+#     work, states, _ = _state_accuracy_components(payload)
+#     summary = (
+#         work.groupby("state_label", observed=True)
+#         .agg(**{"mean_acc (%)": ("accuracy_pct", "mean"), "total_trials": ("n_trials", "sum")})
+#         .reindex(states)
+#         .round(1)
+#     )
+#     return summary
+
+
+def state_accuracy(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
+    work, states, palette = _state_accuracy_components(payload)
+    fig, ax, created_fig = resolve_single_axis(ax=ax, figsize=figsize or (4,4))
+    grouped_acc = _grouped_values(
+        work, label_col="state_label", value_col="accuracy_pct", labels=states
+    )
     subject_lines = (
         work.pivot_table(index="subject", columns="state_label", values="accuracy_pct", aggfunc="first")
         .reindex(columns=states)
         .to_numpy(dtype=float)
     )
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (4, 4)))
     _plot_state_distribution(ax, grouped_acc, states, [palette.get(state, "k") for state in states])
     if subject_lines.size:
         for row in subject_lines:
@@ -139,38 +162,10 @@ def plot_state_accuracy(payload: dict) -> tuple[plt.Figure, pd.DataFrame]:
     ax.set_xlabel("State")
     ax.set_ylabel("Accuracy (%)")
     ax.set_title(payload.get("title", "Accuracy by state"))
-    sns.despine(fig=fig)
-    fig.tight_layout()
 
-    summary = (
-        work.groupby("state_label", observed=True)
-        .agg(**{"mean_acc (%)": ("accuracy_pct", "mean"), "total_trials": ("n_trials", "sum")})
-        .reindex(states)
-        .round(1)
-    )
-    return fig, summary
-
-
-def plot_state_occupancy_overall_boxplot(payload: dict) -> plt.Figure:
-    occupancy_df = to_pandas_df(payload.get("occupancy_df"), name="occupancy_df")
-    require_columns(occupancy_df, ["subject", "state_label", "occupancy"], name="occupancy_df")
-    if occupancy_df.empty:
-        raise ValueError("occupancy_df is empty.")
-    states = payload.get("state_order") or resolve_state_order(occupancy_df)
-    palette = state_palette(states)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (max(5, 1.2 * len(states)), 4)))
-    _plot_state_distribution(
-        ax,
-        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
-        states,
-        [palette[state] for state in states],
-    )
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Fractional occupancy")
-    ax.set_title(payload.get("title", "All selected subjects - overall occupancy"))
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+    if created_fig:
+        fig.tight_layout()
+    return ax
 
 
 def _state_occupancy_components(payload: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], dict[str, str], list[str]]:
@@ -189,252 +184,418 @@ def _state_occupancy_components(payload: dict) -> tuple[pd.DataFrame, pd.DataFra
     subjects = list(pd.unique(occupancy_df["subject"].astype(str)))
     return occupancy_df, session_df, switches, states, palette, subjects
 
+def state_occupancy_overall_summary(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
+    occupancy_df, _, _, states, palette, _ = _state_occupancy_components(payload)
+    fig, ax, created_fig = resolve_single_axis(ax=ax,figsize=figsize or (max(5.0, 1.8 * len(states)), 4.2))
 
-def _plot_occupancy_overall_summary_ax(
-    ax: plt.Axes,
-    occupancy_df: pd.DataFrame,
-    states: list[str],
-    colors: list[str],
-) -> None:
     _plot_state_distribution(
         ax,
         _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
         states,
+        colors = [palette.get(state, "k") for state in states],
+    )
+    ax.set_ylim(0, 1)
+    ax.set_title(payload.get("title", "All selected subjects - overall occupancy"))
+
+    if created_fig:
+        fig.tight_layout()
+    return ax
+
+
+def state_occupancy_overall_by_subject(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
+    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows,
+        nrows=n_rows,
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * n_rows),
+    )
+    colors = [palette[state] for state in states]
+
+    for ax, subject in zip(axes_array[:, 0], subjects, strict=False):
+            subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
+            occ = (
+                subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
+                .reindex(states)
+                .fillna(0.0)
+                .to_numpy(dtype=float)
+            )
+            ax.bar(states, occ, color=colors, alpha=0.85)
+            ax.set_ylim(0, 1)
+            ax.set_ylabel("Fractional occupancy")
+            ax.set_title(f"Subject {subject} - overall occupancy")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
+
+
+def state_occupancy_overall(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
+    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows,
+        nrows=n_rows,
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * n_rows),
+    )
+    colors = [palette[state] for state in states]
+
+    _plot_state_distribution(
+        axes_array[0, 0],
+        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
         colors,
     )
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Fractional occupancy")
-    ax.set_title("All selected subjects - overall occupancy")
+    axes_array[0, 0].set_ylim(0, 1)
+    axes_array[0, 0].set_title(payload.get("title", "All selected subjects - overall occupancy"))
+    for row_idx, subject in enumerate(subjects, start=1):
+            subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
+            occ = (
+                subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
+                .reindex(states)
+                .fillna(0.0)
+                .to_numpy(dtype=float)
+            )
+            axes_array[row_idx, 0].bar(states, occ, color=colors, alpha=0.85)
+            axes_array[row_idx, 0].set_ylim(0, 1)
+            axes_array[row_idx, 0].set_ylabel("Fractional occupancy")
+            axes_array[row_idx, 0].set_title(f"Subject {subject} - overall occupancy")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def _plot_occupancy_overall_subject_ax(
-    ax: plt.Axes,
-    occupancy_df: pd.DataFrame,
-    subject: str,
-    states: list[str],
-    colors: list[str],
-) -> None:
-    subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
-    occ = (
-        subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
-        .reindex(states)
-        .fillna(0.0)
-        .to_numpy(dtype=float)
-    )
-    ax.bar(states, occ, color=colors, alpha=0.85)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Fractional occupancy")
-    ax.set_title(f"Subject {subject} - overall occupancy")
+def state_session_occupancy_summary(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
+    _, session_df, _, states, palette, _ = _state_occupancy_components(payload)
+    fig, ax, created_fig = resolve_single_axis(ax=ax,figsize=figsize or (max(5.0, 1.8 * len(states)), 4.2))
 
-
-def _plot_session_occupancy_summary_ax(
-    ax: plt.Axes,
-    session_df: pd.DataFrame,
-    states: list[str],
-    colors: list[str],
-) -> None:
     _plot_session_violin(
         ax,
         _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
         states,
-        colors,
+        [palette[state] for state in states],
     )
-    ax.set_ylabel("Session occupancy")
-    ax.set_title("All selected sessions - occupancy by session")
+    ax.set_title(payload.get("title", "All selected sessions - occupancy by session"))
+
+    if created_fig:
+        fig.tight_layout()
+    return ax
 
 
-def _plot_session_occupancy_subject_ax(
-    ax: plt.Axes,
-    session_df: pd.DataFrame,
-    subject: str,
-    states: list[str],
-    colors: list[str],
-) -> None:
-    subj_session = session_df[session_df["subject"].astype(str) == subject]
+def state_session_occupancy_by_subject(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
+    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_panels = len(subjects)
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_panels,
+        nrows=n_panels,
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * n_panels),
+    )
+    colors = [palette[state] for state in states]
+
+    for ax, subject in zip(axes_array[:, 0], subjects, strict=False):
+        subj_session = session_df[session_df["subject"].astype(str) == subject]
+        _plot_session_violin(
+            ax,
+            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+            states,
+            colors,
+        )
+        ax.set_ylabel("Session occupancy")
+        ax.set_title(f"Subject {subject} - occupancy by session")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
+
+
+def state_session_occupancy(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
+    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
+    n_rows = len(subjects) + 1
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows,
+        nrows=n_rows,
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * n_rows),
+    )
+    colors = [palette[state] for state in states]
+
     _plot_session_violin(
-        ax,
-        _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+        axes_array[0, 0],
+        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
         states,
         colors,
     )
-    ax.set_ylabel("Session occupancy")
-    ax.set_title(f"Subject {subject} - occupancy by session")
-
-
-def _plot_switches_summary_ax(ax: plt.Axes, switches: pd.DataFrame) -> None:
-    _plot_switch_hist(ax, switches["n_switches"].to_numpy(dtype=float), "All selected sessions - state switches")
-
-
-def _plot_switches_subject_ax(ax: plt.Axes, switches: pd.DataFrame, subject: str) -> None:
-    subj_switch = switches[switches["subject"].astype(str) == subject]
-    _plot_switch_hist(ax, subj_switch["n_switches"].to_numpy(dtype=float), f"Subject {subject} - state switches")
-
-
-def plot_state_occupancy_overall_summary(payload: dict) -> plt.Figure:
-    occupancy_df, _, _, states, palette, _ = _state_occupancy_components(payload)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (max(5.0, 1.8 * len(states)), 4.2)))
-    _plot_occupancy_overall_summary_ax(ax, occupancy_df, states, [palette[state] for state in states])
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
-
-
-def plot_state_occupancy_overall_by_subject(payload: dict) -> plt.Figure:
-    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
-    fig, axes = plt.subplots(
-        len(subjects),
-        1,
-        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
-        squeeze=False,
-    )
-    colors = [palette[state] for state in states]
-
-    for ax, subject in zip(axes[:, 0], subjects, strict=False):
-        _plot_occupancy_overall_subject_ax(ax, occupancy_df, subject, states, colors)
-
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
-
-
-def plot_state_occupancy_overall(payload: dict) -> plt.Figure:
-    occupancy_df, _, _, states, palette, subjects = _state_occupancy_components(payload)
-    n_rows = len(subjects) + 1
-    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
-    colors = [palette[state] for state in states]
-
-    _plot_occupancy_overall_summary_ax(axes[0, 0], occupancy_df, states, colors)
+    axes_array[0, 0].set_title(payload.get("title", "All selected sessions - occupancy by session"))
     for row_idx, subject in enumerate(subjects, start=1):
-        _plot_occupancy_overall_subject_ax(axes[row_idx, 0], occupancy_df, subject, states, colors)
+        subj_session = session_df[session_df["subject"].astype(str) == subject]
+        _plot_session_violin(
+            axes_array[row_idx, 0],
+            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+            states,
+            colors,
+        )
 
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
-
-
-def plot_state_session_occupancy_summary(payload: dict) -> plt.Figure:
-    _, session_df, _, states, palette, _ = _state_occupancy_components(payload)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (max(5.0, 1.8 * len(states)), 4.2)))
-    _plot_session_occupancy_summary_ax(ax, session_df, states, [palette[state] for state in states])
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def plot_state_session_occupancy_by_subject(payload: dict) -> plt.Figure:
-    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
-    fig, axes = plt.subplots(
-        len(subjects),
-        1,
-        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
-        squeeze=False,
-    )
-    colors = [palette[state] for state in states]
-
-    for ax, subject in zip(axes[:, 0], subjects, strict=False):
-        _plot_session_occupancy_subject_ax(ax, session_df, subject, states, colors)
-
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
-
-
-def plot_state_session_occupancy(payload: dict) -> plt.Figure:
-    _, session_df, _, states, palette, subjects = _state_occupancy_components(payload)
-    n_rows = len(subjects) + 1
-    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
-    colors = [palette[state] for state in states]
-
-    _plot_session_occupancy_summary_ax(axes[0, 0], session_df, states, colors)
-    for row_idx, subject in enumerate(subjects, start=1):
-        _plot_session_occupancy_subject_ax(axes[row_idx, 0], session_df, subject, states, colors)
-
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
-
-
-def plot_state_switches_summary(payload: dict) -> plt.Figure:
+def state_switches_summary(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
     _, _, switches, _, _, _ = _state_occupancy_components(payload)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (5.0, 4.2)))
-    _plot_switches_summary_ax(ax, switches)
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+    fig, ax, created_fig = resolve_single_axis(ax=ax,figsize=figsize or (4,4))
+
+    _plot_switch_hist(ax, switches["n_switches"].to_numpy(dtype=float))
+    ax.set_title(payload.get("title", "All selected sessions - state switches"))
+
+    if created_fig:
+        fig.tight_layout()
+    return ax
 
 
-def plot_state_switches_by_subject(payload: dict) -> plt.Figure:
+def state_switches_by_subject(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     _, _, switches, _, _, subjects = _state_occupancy_components(payload)
-    fig, axes = plt.subplots(
-        len(subjects),
-        1,
-        figsize=payload.get("figsize", (5.0, 3.8 * len(subjects))),
-        squeeze=False,
+
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=len(subjects),
+        nrows=len(subjects),
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * len(subjects)),
     )
 
-    for ax, subject in zip(axes[:, 0], subjects, strict=False):
-        _plot_switches_subject_ax(ax, switches, subject)
+    for ax, subject in zip(axes_array[:, 0], subjects, strict=False):
+        _plot_switch_hist(ax, switches[switches["subject"] == subject]["n_switches"].to_numpy(dtype=float))
 
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+    if created_fig:
+        fig.tight_layout()
+
+    return fig, axes_array
 
 
-def plot_state_switches(payload: dict) -> plt.Figure:
+def state_switches(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     _, _, switches, _, _, subjects = _state_occupancy_components(payload)
     n_rows = len(subjects) + 1
-    fig, axes = plt.subplots(n_rows, 1, figsize=payload.get("figsize", (5.0, 3.8 * n_rows)), squeeze=False)
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows,
+        nrows=n_rows,
+        ncols=1,
+        figsize=figsize or (4.0, 4.0 * n_rows),
+    )
 
-    _plot_switches_summary_ax(axes[0, 0], switches)
+    _plot_switch_hist(axes_array[0, 0], switches["n_switches"].to_numpy(dtype=float))
+    axes_array[0, 0].set_title(payload.get("title", "All selected sessions - state switches"))
     for row_idx, subject in enumerate(subjects, start=1):
-        _plot_switches_subject_ax(axes[row_idx, 0], switches, subject)
+        _plot_switch_hist(axes_array[row_idx, 0], switches[switches["subject"] == subject]["n_switches"].to_numpy(dtype=float))
 
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def plot_state_occupancy(payload: dict) -> plt.Figure:
+def state_occupancy(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     occupancy_df, session_df, switches, states, palette, subjects = _state_occupancy_components(payload)
     n_rows = len(subjects) + 1
-    fig, axes = plt.subplots(n_rows, 3, figsize=payload.get("figsize", (14, 3.8 * n_rows)), squeeze=False)
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows * 3,
+        nrows=n_rows,
+        ncols=3,
+        figsize=figsize or (4.0, 4.0 * n_rows),
+    )
     colors = [palette[state] for state in states]
 
-    ax_all_occ, ax_all_sess, ax_all_chg = axes[0]
-    _plot_occupancy_overall_summary_ax(ax_all_occ, occupancy_df, states, colors)
-    _plot_session_occupancy_summary_ax(ax_all_sess, session_df, states, colors)
-    _plot_switches_summary_ax(ax_all_chg, switches)
+    ax_all_occ, ax_all_sess, ax_all_chg = axes_array[0]
+    _plot_state_distribution(
+        ax_all_occ,
+        _grouped_values(occupancy_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    ax_all_occ.set_ylim(0, 1)
+    _plot_session_violin(
+        ax_all_sess,
+        _grouped_values(session_df, label_col="state_label", value_col="occupancy", labels=states),
+        states,
+        colors,
+    )
+    _plot_switch_hist(ax_all_chg, switches["n_switches"].to_numpy(dtype=float))
 
     for row_idx, subject in enumerate(subjects, start=1):
-        ax_occ, ax_box, ax_chg = axes[row_idx]
-        _plot_occupancy_overall_subject_ax(ax_occ, occupancy_df, subject, states, colors)
-        _plot_session_occupancy_subject_ax(ax_box, session_df, subject, states, colors)
-        _plot_switches_subject_ax(ax_chg, switches, subject)
+        subj_occ = occupancy_df[occupancy_df["subject"].astype(str) == subject]
+        occ = (
+            subj_occ.set_index(subj_occ["state_label"].astype(str))["occupancy"]
+            .reindex(states)
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        axes_array[row_idx, 0].bar(states, occ, color=colors, alpha=0.85)
+        axes_array[row_idx, 0].set_ylim(0, 1)
+        axes_array[row_idx, 0].set_ylabel("Fractional occupancy")
+        axes_array[row_idx, 0].set_title(f"Subject {subject} - overall occupancy")
+        axes_array[row_idx, 0].set_ylim(0, 1)
 
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+        subj_session = session_df[session_df["subject"].astype(str) == subject]
+        _plot_session_violin(
+            axes_array[row_idx, 1],
+            _grouped_values(subj_session, label_col="state_label", value_col="occupancy", labels=states),
+            states,
+            colors,
+        )
+        axes_array[row_idx, 1].set_ylabel("Session occupancy")
+        axes_array[row_idx, 1].set_title(f"Subject {subject} - occupancy by session")
+
+        _plot_switch_hist(axes_array[row_idx, 2], switches[switches["subject"] == subject]["n_switches"].to_numpy(dtype=float))
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def plot_state_dwell_times_by_subject(payload: dict) -> plt.Figure:
+def state_dwell_times_by_subject(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     dwell_df = to_pandas_df(payload.get("dwell_df"), name="dwell_df")
     require_columns(dwell_df, ["subject", "state_label", "dwell"], name="dwell_df")
     if dwell_df.empty:
         raise ValueError("dwell_df is empty.")
-    states = payload.get("state_order") or resolve_state_order(dwell_df)
+
+    states = list(payload.get("state_order") or resolve_state_order(dwell_df))
+    subjects = list(payload.get("subject_order") or pd.unique(dwell_df["subject"].astype(str)))
+
     palette = state_palette(states)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (9, 4)))
-    sns.ecdfplot(data=dwell_df, x="dwell", hue="state_label", hue_order=states, palette=palette, complementary=True, ax=ax)
-    ax.set_xlabel("Dwell length (trials)")
-    ax.set_ylabel("Survival probability")
-    ax.set_title(payload.get("title", "Dwell times by subject"))
-    ax.legend(frameon=False)
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
 
+    max_dwell = int(payload.get("max_dwell", max(1.0, dwell_df["dwell"].max())))
+    bins = np.arange(0, max_dwell + 2)
 
-def plot_state_dwell_times_summary(payload: dict) -> plt.Figure:
+    nrows = len(subjects)
+    ncols = len(states)
+    n_panels = nrows * ncols
+
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_panels,
+        nrows=nrows,
+        ncols=ncols,
+        figsize=figsize or (4.1 * ncols, 2.8 * nrows),
+        sharex=True,
+        sharey=True,
+    )
+
+    y_max = 0.0
+
+    for row_idx, subject in enumerate(subjects):
+        subject_df = dwell_df[dwell_df["subject"].astype(str) == str(subject)]
+
+        for col_idx, state in enumerate(states):
+            ax = axes_array[row_idx, col_idx]
+            sub = subject_df[subject_df["state_label"].astype(str) == str(state)]
+            color = palette[state]
+
+            if not sub.empty:
+                values = pd.to_numeric(sub["dwell"], errors="coerce").dropna().to_numpy(dtype=float)
+                values = values[np.isfinite(values)]
+
+                if values.size:
+                    counts, edges = np.histogram(values, bins=bins)
+                    empirical = counts / counts.sum()
+                    centers = edges[:-1]
+                    y_max = max(y_max, float(empirical.max()))
+
+                    ax.plot(
+                        centers,
+                        empirical,
+                        color=color,
+                        lw=2.4,
+                        marker="o",
+                        ms=4.5,
+                    )
+
+            ax.set_xlim(0, max_dwell)
+            ax.set_ylim(0.0, max(0.01, 1.08 * y_max))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+
+            if row_idx == 0:
+                ax.set_title(state, color=color, fontsize=14, pad=10)
+
+            if col_idx == 0:
+                ax.set_ylabel(str(subject))
+
+    fig.supylabel("frac. dwell times in state")
+    fig.supxlabel("state dwell time\n# trials")
+
+    if created_fig:
+        fig.tight_layout()
+
+    return fig, axes_array
+
+def state_dwell_times_summary(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     summary_df = to_pandas_df(payload.get("dwell_summary_df"), name="dwell_summary_df")
     require_columns(summary_df, ["state_label", "bin_center", "empirical"], name="dwell_summary_df")
     if summary_df.empty:
@@ -442,17 +603,28 @@ def plot_state_dwell_times_summary(payload: dict) -> plt.Figure:
     states = payload.get("state_order") or resolve_state_order(summary_df)
     palette = state_palette(states)
     max_dwell = int(payload.get("max_dwell", max(1.0, summary_df["bin_center"].max() * 2.0)))
-    fig, axes = plt.subplots(
-        1,
-        len(states),
-        figsize=payload.get("figsize", (4.1 * len(states), 3.3)),
-        sharex=True,
-        sharey=True,
-        squeeze=False,
-    )
+    n_panels = len(states)
+    grid_shape = (1, len(states))
+    created_fig = axes is None
+    if created_fig:
+        fig, axes = plt.subplots(
+            *grid_shape,
+            figsize=figsize or (4.1 * len(states), 3.3),
+            sharex=True,
+            sharey=True,
+            squeeze=False,
+        )
+        flat_axes = np.asarray(axes, dtype=object).ravel()
+    else:
+        flat_axes = np.asarray(axes, dtype=object).ravel()
+        if len(flat_axes) < n_panels:
+            raise ValueError(f"Expected at least {n_panels} axes, got {len(flat_axes)}.")
+        fig = flat_axes[0].figure
+    axes_array = flat_axes[:n_panels].reshape(grid_shape)
+
     y_max = float(payload.get("y_max", max(0.01, summary_df["empirical"].max())))
     for idx, state in enumerate(states):
-        ax = axes[0, idx]
+        ax = axes_array[0, idx]
         sub = summary_df[summary_df["state_label"].astype(str) == state].sort_values("bin_center")
         color = palette[state]
         has_predicted = "predicted" in sub.columns and sub["predicted"].notna().any()
@@ -489,17 +661,19 @@ def plot_state_dwell_times_summary(payload: dict) -> plt.Figure:
     ]
     if "predicted" not in summary_df.columns or summary_df["predicted"].isna().all():
         legend_handles = [legend_handles[1]]
-    axes[0, min(1, len(states) - 1)].legend(handles=legend_handles, loc="upper right", frameon=False)
-    sns.despine(fig=fig)
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
-    return fig
+    axes_array[0, min(1, len(states) - 1)].legend(handles=legend_handles, loc="upper right", frameon=False)
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def plot_state_dwell_times(payload: dict) -> plt.Figure:
-    return plot_state_dwell_times_by_subject(payload)
-
-
-def plot_state_posterior_count_kde(payload: dict) -> plt.Figure:
+def state_posterior_count_kde(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
     posterior_df = to_pandas_df(payload.get("posterior_df"), name="posterior_df")
     require_columns(posterior_df, ["state_label", "probability"], name="posterior_df")
     if posterior_df.empty:
@@ -508,7 +682,8 @@ def plot_state_posterior_count_kde(payload: dict) -> plt.Figure:
     palette = state_palette(states)
     bins = int(payload.get("bins", 40))
     edges = np.linspace(0.0, 1.0, bins + 1)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (5, 4)))
+    fig, ax, created_fig = resolve_single_axis(ax=ax,figsize=figsize or (4,4))
+
     legend_handles = []
     for state in states:
         vals = pd.to_numeric(
@@ -531,9 +706,10 @@ def plot_state_posterior_count_kde(payload: dict) -> plt.Figure:
     ax.set_title(payload.get("title", "Posterior count distribution"))
     if legend_handles:
         ax.legend(handles=legend_handles, frameon=False, fontsize=8)
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+
+    if created_fig:
+        fig.tight_layout()
+    return ax
 
 
 def _change_direction_title(direction: str, engaged_label: str, disengaged_label: str) -> str:
@@ -573,7 +749,12 @@ def _plot_change_triggered_mean(
     ax.legend(frameon=False, fontsize=8, loc="upper right")
 
 
-def plot_change_triggered_posteriors_summary(payload: dict) -> plt.Figure:
+def change_triggered_posteriors_summary(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     change_df = to_pandas_df(payload.get("change_df"), name="change_df")
     require_columns(change_df, ["subject", "direction", "relative_trial", "state_label", "probability"], name="change_df")
     if change_df.empty:
@@ -592,14 +773,22 @@ def plot_change_triggered_posteriors_summary(payload: dict) -> plt.Figure:
             x = np.arange(-window, window + 1, dtype=int)
     else:
         x = np.asarray(sorted(pd.unique(change_df["relative_trial"])), dtype=float)
-    fig, axes = plt.subplots(1, len(directions), figsize=payload.get("figsize", (14.0, 4.4)), squeeze=False, sharex=True, sharey=True)
+
+    n_panels = len(directions)
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_panels,
+        nrows=1,
+        ncols=len(directions),
+        figsize=figsize or (4.0 * n_panels, 4.0),
+    )
 
     subject_means = (
         change_df.groupby(["subject", "direction", "state_label", "relative_trial"], observed=True)
         .agg(probability=("probability", "mean"))
         .reset_index()
     )
-    for ax, direction in zip(axes[0], directions, strict=False):
+    for ax, direction in zip(axes_array[0], directions, strict=False):
         sub = subject_means[subject_means["direction"].astype(str) == direction]
         direction_title = _change_direction_title(direction, labels[0], labels[1])
         if sub.empty:
@@ -620,11 +809,15 @@ def plot_change_triggered_posteriors_summary(payload: dict) -> plt.Figure:
             means[label] = stats["mean"].to_numpy(dtype=float)
             sems[label] = stats["sem"].to_numpy(dtype=float)
         n_subjects = int(sub["subject"].nunique())
-        n_changes = int(
-            change_df.loc[change_df["direction"].astype(str) == direction, ["subject", "change_id"]]
-            .drop_duplicates()
-            .shape[0]
-        ) if "change_id" in change_df.columns else n_subjects
+        n_changes = (
+            int(
+                change_df.loc[change_df["direction"].astype(str) == direction, ["subject", "change_id"]]
+                .drop_duplicates()
+                .shape[0]
+            )
+            if "change_id" in change_df.columns
+            else n_subjects
+        )
         _plot_change_triggered_mean(
             ax,
             x,
@@ -636,13 +829,19 @@ def plot_change_triggered_posteriors_summary(payload: dict) -> plt.Figure:
         )
         ax.set_xlabel("Trials relative to state change")
     if len(directions) > 1:
-        axes[0, 1].set_ylabel("")
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+        axes_array[0, 1].set_ylabel("")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array
 
 
-def plot_change_triggered_posteriors_by_subject(payload: dict) -> plt.Figure:
+def change_triggered_posteriors_by_subject(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
     change_df = to_pandas_df(payload.get("change_df"), name="change_df")
     require_columns(change_df, ["subject", "direction", "relative_trial", "state_label", "probability"], name="change_df")
     if change_df.empty:
@@ -662,17 +861,19 @@ def plot_change_triggered_posteriors_by_subject(payload: dict) -> plt.Figure:
             x = np.arange(-window, window + 1, dtype=int)
     else:
         x = np.asarray(sorted(pd.unique(change_df["relative_trial"])), dtype=float)
-    fig, axes = plt.subplots(
-        len(subjects),
-        len(directions),
-        figsize=payload.get("figsize", (14.0, max(3.0, 2.8 * len(subjects)))),
-        squeeze=False,
-        sharex=True,
-        sharey=True,
+
+    n_panels = len(subjects) * len(directions)
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_panels,
+        nrows=1,
+        ncols=len(directions),
+        figsize=figsize or (4.0 * n_panels, 4.0),
     )
+
     for row_idx, subject in enumerate(subjects):
         for col_idx, direction in enumerate(directions):
-            ax = axes[row_idx, col_idx]
+            ax = axes_array[row_idx, col_idx]
             sub = change_df[
                 (change_df["subject"].astype(str) == subject)
                 & (change_df["direction"].astype(str) == direction)
@@ -695,13 +896,17 @@ def plot_change_triggered_posteriors_by_subject(payload: dict) -> plt.Figure:
                 )
                 means[label] = stats["mean"].to_numpy(dtype=float)
                 sems[label] = stats["sem"].to_numpy(dtype=float)
-            n_changes = int(
-                change_df.loc[
-                    (change_df["subject"].astype(str) == subject)
-                    & (change_df["direction"].astype(str) == direction),
-                    "change_id",
-                ].nunique()
-            ) if "change_id" in change_df.columns else 1
+            n_changes = (
+                int(
+                    change_df.loc[
+                        (change_df["subject"].astype(str) == subject)
+                        & (change_df["direction"].astype(str) == direction),
+                        "change_id",
+                    ].nunique()
+                )
+                if "change_id" in change_df.columns
+                else 1
+            )
             _plot_change_triggered_mean(
                 ax,
                 x,
@@ -712,10 +917,11 @@ def plot_change_triggered_posteriors_by_subject(payload: dict) -> plt.Figure:
                 title=f"Subject {subject} - {direction_title}  (n={n_changes} changes)",
             )
     for col_idx in range(len(directions)):
-        axes[-1, col_idx].set_xlabel("Trials relative to confident state change")
+        axes_array[-1, col_idx].set_xlabel("Trials relative to confident state change")
     if len(directions) > 1:
         for row_idx in range(len(subjects)):
-            axes[row_idx, 1].set_ylabel("")
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+            axes_array[row_idx, 1].set_ylabel("")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, axes_array

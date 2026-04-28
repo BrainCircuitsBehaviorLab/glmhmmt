@@ -5,45 +5,79 @@ from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
-from glmhmmt.model_plotting.utils import require_columns, resolve_state_order, state_palette, to_pandas_df
+from glmhmmt.plots.utils import require_columns, resolve_state_order, state_palette, to_pandas_df
+from glmhmmt.plots.common import resolve_single_axis
 
-
-def plot_posterior_probs(
+def posterior_probs(
     posterior_df,
     *,
-    subject: str | None = None,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+    rolling_window: int | None = None,
     title: str | None = None,
-) -> plt.Figure:
+) -> plt.Axes:
     df = to_pandas_df(posterior_df, name="posterior_df")
-    require_columns(df, ["subject", "trial_idx", "state_label", "probability"], name="posterior_df")
-    if subject is not None:
-        df = df[df["subject"].astype(str) == str(subject)].copy()
-    if df.empty:
-        raise ValueError("posterior_df has no rows for the requested subject.")
+    require_columns(df, ["trial_idx", "state_label", "probability"], name="posterior_df")
 
-    if subject is None:
-        subject = str(df["subject"].iloc[0])
-        df = df[df["subject"].astype(str) == subject].copy()
+    if df.empty:
+        raise ValueError("posterior_df is empty.")
 
     states = resolve_state_order(df)
     palette = state_palette(states)
-    fig, ax = plt.subplots(figsize=(10, 3.4))
+
+    wide = (
+        df.pivot_table(
+            index="trial_idx",
+            columns="state_label",
+            values="probability",
+            aggfunc="mean",
+        )
+        .sort_index()
+        .reindex(columns=states)
+        .fillna(0.0)
+    )
+
+    if rolling_window is not None:
+        wide = wide.rolling(rolling_window, min_periods=1).mean()
+
+    fig, ax, created_fig = resolve_single_axis(ax=ax, figsize=figsize or (10, 3.4))
+
+    x = wide.index.to_numpy()
+    bottom = np.zeros(len(wide))
+
     for state in states:
-        sub = df[df["state_label"].astype(str) == state].sort_values("trial_idx")
-        ax.plot(sub["trial_idx"], sub["probability"], lw=1.5, color=palette[state], label=state)
+        y = wide[state].to_numpy()
+        ax.fill_between(
+            x,
+            bottom,
+            bottom + y,
+            color=palette[state],
+            alpha=0.75,
+            linewidth=0,
+            label=state,
+        )
+        bottom += y
+
     ax.set_ylim(0, 1)
     ax.set_xlabel("Trial")
     ax.set_ylabel("Posterior probability")
-    ax.set_title(title or f"Posterior probabilities - {subject}")
+    if title is not None:
+        ax.set_title(title)
     ax.legend(frameon=False, ncol=min(4, len(states)))
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+
+    if created_fig:
+        fig.tight_layout()
+
+    return ax
 
 
-def plot_session_trajectories(payload: dict) -> plt.Figure:
+def session_trajectories(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Axes:
     trajectory_df = to_pandas_df(payload.get("trajectory_df"), name="trajectory_df")
     require_columns(
         trajectory_df,
@@ -53,30 +87,58 @@ def plot_session_trajectories(payload: dict) -> plt.Figure:
     if trajectory_df.empty:
         raise ValueError("trajectory_df is empty.")
 
-    states = payload.get("state_order") or resolve_state_order(trajectory_df)
+    states = list(payload.get("state_order") or resolve_state_order(trajectory_df))
     palette = state_palette(states)
-    fig, ax = plt.subplots(figsize=payload.get("figsize", (9, 4)))
-    sns.lineplot(
-        data=trajectory_df,
-        x="trial_in_session",
-        y="probability",
-        hue="state_label",
-        hue_order=states,
-        palette=palette,
-        errorbar="se",
+
+    fig, ax, created_fig = resolve_single_axis(
         ax=ax,
+        figsize=figsize or (9.0, 4.0),
     )
+
+    grouped = (
+        trajectory_df.assign(
+            trial_in_session=pd.to_numeric(
+                trajectory_df["trial_in_session"],
+                errors="coerce",
+            ),
+            probability=pd.to_numeric(
+                trajectory_df["probability"],
+                errors="coerce",
+            ),
+        )
+        .dropna(subset=["trial_in_session", "probability"])
+        .groupby(["state_label", "trial_in_session"], observed=True)["probability"]
+        .agg(["mean", "sem"])
+        .reset_index()
+        .sort_values("trial_in_session")
+    )
+
+    for state in states:
+        sub = grouped[grouped["state_label"].astype(str) == str(state)]
+        if sub.empty:
+            continue
+
+        x = sub["trial_in_session"].to_numpy(dtype=float)
+        y = sub["mean"].to_numpy(dtype=float)
+        sem = sub["sem"].fillna(0.0).to_numpy(dtype=float)
+        color = palette[state]
+
+        ax.plot(x, y, color=color, lw=2.0, label=state)
+        ax.fill_between(x, y - sem, y + sem, color=color, alpha=0.18, linewidth=0)
+
     ax.set_ylim(0, 1)
     ax.set_xlabel("Trial within session")
     ax.set_ylabel("Mean posterior probability")
     ax.set_title(payload.get("title", "Session trajectories"))
     ax.legend(frameon=False, bbox_to_anchor=(1.01, 1), loc="upper left")
-    sns.despine(fig=fig)
-    fig.tight_layout()
-    return fig
+
+    if created_fig:
+        fig.tight_layout()
+
+    return ax
 
 
-def plot_session_deepdive(payload: dict) -> plt.Figure:
+def session_deepdive(payload: dict) -> plt.Figure:
     trial_df = to_pandas_df(payload.get("trial_df"), name="trial_df")
     posterior_df = to_pandas_df(payload.get("posterior_df"), name="posterior_df")
     require_columns(trial_df, ["trial_in_session"], name="trial_df")
@@ -236,7 +298,6 @@ def plot_session_deepdive(payload: dict) -> plt.Figure:
     else:
         ax.set_xlabel("Trial within session")
 
-    sns.despine(fig=fig)
     fig.tight_layout()
     fig.subplots_adjust(right=0.82)
     return fig

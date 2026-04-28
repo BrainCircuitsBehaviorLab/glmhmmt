@@ -50,9 +50,6 @@ _ASSET_DIR = Path(__file__).parent
 def _paths():
     return get_runtime_paths()
 
-_CONDITION_FILTER_TASKS = {"2AFC_DRUG"}
-_CONDITION_FILTER_OPTIONS = ["all", "saline", "drug"]
-
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 _HASH_RE   = re.compile(r"^[0-9a-f]{8}$")
@@ -660,7 +657,12 @@ class ModelManagerWidget(anywidget.AnyWidget):
         return "ready"
 
     def _supports_condition_filter(self) -> bool:
-        return self.task.upper() in _CONDITION_FILTER_TASKS and self.model_type != "glmhmmt"
+        if self.model_type == "glmhmmt":
+            return False
+        try:
+            return bool(get_adapter(self.task).condition_filter_options())
+        except Exception:
+            return False
 
     def _build_model_info_list(
         self, fits_path: Path, default_info: dict
@@ -729,10 +731,11 @@ class ModelManagerWidget(anywidget.AnyWidget):
             adapter = get_adapter(self.task)
             self.is_2afc = adapter.num_classes == 2
             self.show_condition_filter = self._supports_condition_filter()
-            self.condition_filter_options = list(_CONDITION_FILTER_OPTIONS) if self.show_condition_filter else []
+            adapter_filter_options = list(adapter.condition_filter_options())
+            self.condition_filter_options = adapter_filter_options if self.show_condition_filter else []
             if not self.show_condition_filter:
                 self.condition_filter = "all"
-            elif self.condition_filter not in _CONDITION_FILTER_OPTIONS:
+            elif self.condition_filter not in adapter_filter_options:
                 self.condition_filter = "all"
 
             df_all   = adapter.read_dataset()

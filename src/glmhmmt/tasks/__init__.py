@@ -71,6 +71,14 @@ class TaskAdapter(ABC):
     data_file: str = NotImplemented     # filename under the runtime dataset root
     sort_col: str = NotImplemented      # trial ordering column
     session_col: str = NotImplemented   # session identifier column
+    emission_cols: List[str] = []
+    transition_cols: List[str] = []
+    prediction_col: str = "p_pred"
+    model_correct_col: str = "p_model_correct"
+    marginal_model_correct_col: str = "p_model_correct_marginal"
+    correct_bool_col: str = "correct_bool"
+    psychometric_x_col: str = "stimulus"
+    psychometric_x_label: str = "Stimulus"
 
     # ── data preparation ────────────────────────────────────────────────────
 
@@ -114,17 +122,18 @@ class TaskAdapter(ABC):
 
     # ── column defaults  ────────────────────────────────────────────────────
 
-    @abstractmethod
     def default_emission_cols(self, df: Any = None) -> List[str]:
         """Ordered list of default emission regressors.
 
         Adapters may inspect ``df`` to include dynamic task-owned columns such
         as one-hot stimulus bins or frame-level regressors.
         """
+        del df
+        return list(self.emission_cols)
 
-    @abstractmethod
     def default_transition_cols(self) -> List[str]:
         """Ordered list of transition regressor names for UI initialisation."""
+        return list(self.transition_cols)
 
     def available_emission_cols(self, df: Any = None) -> List[str]:
         """Ordered list of selectable emission regressors."""
@@ -182,6 +191,31 @@ class TaskAdapter(ABC):
         """Return per-trial labels used for CV balancing, or ``None`` if unsupported."""
         return None
 
+    def condition_filter_options(self) -> list[str]:
+        """Return named dataset condition filters supported by this adapter."""
+        return []
+
+    def filter_condition_df(self, df: Any, condition_filter: str = "all") -> Any:
+        """Apply an optional named condition filter to a task dataframe."""
+        del condition_filter
+        return df
+
+    def weight_family_specs(self, weights_df: Any = None) -> Dict[str, dict]:
+        """Return task-owned metadata for plot-ready one-hot weight families."""
+        del weights_df
+        return {}
+
+    def prepare_weight_family_plot(
+        self,
+        weights_df: Any,
+        family_key: str,
+        *,
+        variant: str | None = None,
+    ):
+        """Return a task-owned prepared dataframe for one weight family plot."""
+        del weights_df, family_key, variant
+        return None
+
     def dataset_path(self) -> Path:
         """Return the on-disk dataset path for this task."""
         return get_data_dir() / self.data_file
@@ -192,9 +226,12 @@ class TaskAdapter(ABC):
 
     # ── plot module ─────────────────────────────────────────────────────────
 
-    @abstractmethod
     def get_plots(self) -> types.ModuleType:
         """Return the task-specific plots module."""
+        return resolve_plots_module(
+            adapter_module_name=self.__module__,
+            task_key=self.task_key,
+        )
 
     @property
     def choice_labels(self) -> list[str]:
@@ -225,6 +262,35 @@ class TaskAdapter(ABC):
             ``"response"``    — integer chosen class
             ``"performance"`` — 0/1 trial outcome
         """
+
+    def behavioral_col(self, canonical: str, default: str | None = None) -> str:
+        """Return the canonical trial_df column name used after postprocessing.
+
+        ``build_trial_df`` renames task-owned behavioral columns to canonical
+        names. Plot code should therefore use these canonical names instead of
+        each dataset's raw schema.
+        """
+        return canonical if canonical in self.behavioral_cols else (default or canonical)
+
+    @property
+    def trial_idx_col(self) -> str:
+        return self.behavioral_col("trial_idx")
+
+    @property
+    def trial_col(self) -> str:
+        return self.behavioral_col("trial")
+
+    @property
+    def stimulus_col(self) -> str:
+        return self.behavioral_col("stimulus")
+
+    @property
+    def response_col(self) -> str:
+        return self.behavioral_col("response")
+
+    @property
+    def performance_col(self) -> str:
+        return self.behavioral_col("performance")
 
     # ── state labelling ──────────────────────────────────────────────────────
 
