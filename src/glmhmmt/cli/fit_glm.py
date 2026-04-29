@@ -17,6 +17,26 @@ from glmhmmt.tasks import get_adapter
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
+def _normalize_condition_filter(task: str, condition_filter: str | None) -> str:
+    options = get_adapter(task).condition_filter_options()
+    if not options:
+        return "all"
+    value = str(condition_filter or "all").strip().lower()
+    if value in options:
+        return value
+    if value == "saline" and "rest" in options:
+        return "rest"
+    return "all"
+
+
+def _filter_condition_df(df: pl.DataFrame, task: str, condition_filter: str | None) -> pl.DataFrame:
+    if df.is_empty():
+        return df
+    adapter = get_adapter(task)
+    selected = _normalize_condition_filter(task, condition_filter)
+    return adapter.filter_condition_df(df, selected)
+
+
 def fit_subject(
     subject: str,
     emission_cols: list[str] | None = None,
@@ -30,6 +50,7 @@ def fit_subject(
     seed: int = 0,
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
+    condition_filter: str = "all",
 ) -> dict:
     """Fit a GLM (K=1) to a single subject."""
 
@@ -40,6 +61,7 @@ def fit_subject(
     # 1. Load Data
     df = adapter.read_dataset()
     df = adapter.subject_filter(df)
+    df = _filter_condition_df(df, task, condition_filter)
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
     if len(df_sub) == 0:
         return None
@@ -141,6 +163,7 @@ def generate_model_id(
     restart_noise_scale: float = 0.05,
     seed: int | None = 0,
     baseline_class_idx: int = 0,
+    condition_filter: str = "all",
 ):
     cols = sorted(emission_cols) if emission_cols else []
     config = {
@@ -155,6 +178,8 @@ def generate_model_id(
         config["n_restarts"] = int(n_restarts)
         config["restart_noise_scale"] = float(restart_noise_scale)
         config["seed"] = None if seed is None else int(seed)
+    if get_adapter(task).condition_filter_options():
+        config["condition_filter"] = _normalize_condition_filter(task, condition_filter)
     config_str = json.dumps(config, sort_keys=True)
     return hashlib.md5(config_str.encode()).hexdigest()[:8]
 
@@ -174,6 +199,7 @@ def main(
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
+    condition_filter: str = "all",
 ):
     # Compute base output directory
     base_out_dir = get_results_dir() / "fits" / task / "glm"
@@ -190,6 +216,7 @@ def main(
         restart_noise_scale=restart_noise_scale,
         seed=seed,
         baseline_class_idx=baseline_class_idx,
+        condition_filter=condition_filter,
     )
     out_dirs = [base_out_dir / model_hash]
 
@@ -218,9 +245,11 @@ def main(
 
     adapter = get_adapter(task)
     num_classes = adapter.num_classes
+    condition_filter = _normalize_condition_filter(task, condition_filter)
 
     df = adapter.read_dataset()
     df = adapter.subject_filter(df)
+    df = _filter_condition_df(df, task, condition_filter)
 
     if subjects is None:
         subjects = df["subject"].unique().sort().to_list()
@@ -256,6 +285,11 @@ def main(
                     "seed": seed,
                     "baseline_class_idx": int(baseline_class_idx),
                     "model_id": d.name,
+                    **(
+                        {"condition_filter": condition_filter}
+                        if adapter.condition_filter_options()
+                        else {}
+                    ),
                 },
                 f,
                 indent=4,
@@ -294,6 +328,7 @@ def main(
                 seed=seed,
                 progress_callback=_progress if progress_callback is not None else None,
                 baseline_class_idx=baseline_class_idx,
+                condition_filter=condition_filter,
             )
             for d in out_dirs:
                 save_results(res, d, tau)
@@ -313,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument("--subjects", nargs="+", default=None)
     parser.add_argument("--out_dir", type=str, default=None)
     parser.add_argument("--tau", type=float, default=50.0) 
-    parser.add_argument("--task", type=str, default="MCDR", choices=["MCDR", "2AFC", "nuo_auditory"])
+    parser.add_argument("--task", type=str, default="MCDR", choices=["MCDR", "2AFC", "2AFC_DRUG", "2AFC_delay", "nuo_auditory"])
     parser.add_argument("--num_classes", type=int, default=3)
     parser.add_argument("--model_alias", type=str, default=None)
     parser.add_argument(
@@ -337,6 +372,12 @@ if __name__ == "__main__":
         default=0,
         help="Choice class used as the implicit softmax reference.",
     )
+    parser.add_argument(
+        "--condition_filter",
+        type=str,
+        default="all",
+        help="Task-specific condition subset, for example rest or drug for 2AFC_DRUG.",
+    )
 
     args = parser.parse_args()
     configure_paths_from_args(args)
@@ -354,4 +395,5 @@ if __name__ == "__main__":
         restart_noise_scale=args.restart_noise_scale,
         seed=args.seed,
         baseline_class_idx=args.baseline_class_idx,
+        condition_filter=args.condition_filter,
     )

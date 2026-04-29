@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.6
+- Added conditional filtering in the fit_glm.py.
+
 ## 0.2.5
 - Minor fixes in plotting module.
 
