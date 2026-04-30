@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.7
+- Changed the pinned pyarrow version to increase compatibility.
+
 ## 0.2.6
 - Added conditional filtering in the fit_glm.py.
 
