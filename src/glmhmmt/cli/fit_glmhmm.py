@@ -677,8 +677,8 @@ if __name__ == "__main__":
         "--condition_filter",
         type=str,
         default="all",
-        choices=["all", "saline", "drug"],
-        help="Condition subset for 2AFC_DRUG. Ignored for other tasks.",
+        choices=["all", "nan", "rest", "saline", "drug"],
+        help="Task-specific condition subset, for example saline or drug for drug adapters.",
     )
     parser.add_argument(
         "--baseline_class_idx",

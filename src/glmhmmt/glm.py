@@ -35,6 +35,23 @@ class GLMFitResult:
     def num_classes(self) -> int:
         return int(self.weights.shape[0])
 
+    def simulate(
+        self,
+        *,
+        seed: int | None = None,
+        n_simulations: int = 1,
+    ) -> np.ndarray:
+        """Simulate choice sequences from this fitted GLM on its stored design matrix."""
+        return simulate_glm_choices(
+            self.X,
+            self.weights,
+            baseline_class_idx=0,
+            lapse_mode=self.lapse_mode,
+            lapse_rates=self.lapse_rates,
+            seed=seed,
+            n_simulations=n_simulations,
+        )
+
 
 def _validate_glm_inputs(
     X: ArrayLike,
@@ -255,6 +272,131 @@ def _apply_lapse_mode(
         adjusted[0] = probs[0]
         return adjusted
     return probs
+
+
+def _resolve_full_weight_matrix(
+    weights: ArrayLike,
+    *,
+    baseline_class_idx: int,
+    num_classes: int | None = None,
+) -> np.ndarray:
+    W = np.asarray(weights, dtype=float)
+    if W.ndim != 2:
+        raise ValueError(f"weights must be a 2D array; got shape {W.shape}.")
+
+    baseline = int(baseline_class_idx)
+    if num_classes is None:
+        num_classes = W.shape[0] if baseline < W.shape[0] else W.shape[0] + 1
+    num_classes = int(num_classes)
+    if not 0 <= baseline < num_classes:
+        raise ValueError(f"baseline_class_idx must be in [0, {num_classes - 1}].")
+
+    if W.shape[0] == num_classes:
+        return W
+    if W.shape[0] != num_classes - 1:
+        raise ValueError(
+            "weights must have either num_classes rows or num_classes - 1 rows; "
+            f"got {W.shape[0]} rows for num_classes={num_classes}."
+        )
+
+    zero_row = np.zeros((1, W.shape[1]), dtype=W.dtype)
+    return np.concatenate([W[:baseline], zero_row, W[baseline:]], axis=0)
+
+
+def glm_probs_from_weights(
+    X: ArrayLike,
+    weights: ArrayLike,
+    *,
+    baseline_class_idx: int = 0,
+    num_classes: int | None = None,
+) -> np.ndarray:
+    """Compute base softmax GLM probabilities from a design matrix and weights."""
+    X_np = np.asarray(X, dtype=float)
+    if X_np.ndim != 2:
+        raise ValueError(f"X must be a 2D array; got shape {X_np.shape}.")
+    W = _resolve_full_weight_matrix(
+        weights,
+        baseline_class_idx=baseline_class_idx,
+        num_classes=num_classes,
+    )
+    if X_np.shape[1] != W.shape[1]:
+        raise ValueError(f"X has {X_np.shape[1]} columns but weights have {W.shape[1]}.")
+    return softmax(X_np @ W.T, axis=1)
+
+
+def simulate_glm_choices(
+    X: ArrayLike,
+    weights: ArrayLike,
+    *,
+    baseline_class_idx: int = 0,
+    num_classes: int | None = None,
+    lapse_mode: str | None = "none",
+    lapse_rates: ArrayLike | None = None,
+    seed: int | None = None,
+    n_simulations: int = 1,
+) -> np.ndarray:
+    """Simulate categorical choices from a fitted GLM on a fixed design matrix.
+
+    The design matrix is treated as fixed. History-conditioned lapse modes use
+    previously simulated choices, but any history regressors already present in
+    ``X`` are not recomputed after each simulated choice.
+    """
+    base_probs = glm_probs_from_weights(
+        X,
+        weights,
+        baseline_class_idx=baseline_class_idx,
+        num_classes=num_classes,
+    )
+    T, C = base_probs.shape
+    lapse_mode = _normalize_lapse_mode(lapse_mode, None)
+    lapse_rates_np = (
+        np.zeros(_num_lapse_params(C, lapse_mode), dtype=float)
+        if lapse_rates is None
+        else np.asarray(lapse_rates, dtype=float).reshape(-1)
+    )
+    rng = np.random.default_rng(seed)
+    n_simulations = int(n_simulations)
+    if n_simulations < 1:
+        raise ValueError("n_simulations must be at least 1.")
+
+    simulations = np.zeros((n_simulations, T), dtype=int)
+    for sim_idx in range(n_simulations):
+        for t in range(T):
+            probs_t = base_probs[t].copy()
+            if t > 0 and lapse_mode == "history":
+                prev = int(simulations[sim_idx, t - 1])
+                repeat_rate = float(lapse_rates_np[0]) if lapse_rates_np.size > 0 else 0.0
+                alternate_rate = float(lapse_rates_np[1]) if lapse_rates_np.size > 1 else 0.0
+                repeat_target = np.zeros(C, dtype=float)
+                repeat_target[prev] = 1.0
+                alternate_target = np.full(C, 1.0 / max(1, C - 1), dtype=float)
+                alternate_target[prev] = 0.0
+                probs_t = (1.0 - repeat_rate - alternate_rate) * probs_t
+                probs_t += repeat_rate * repeat_target + alternate_rate * alternate_target
+            elif t > 0 and lapse_mode == "history_conditioned":
+                prev = int(simulations[sim_idx, t - 1])
+                repeat_rates = lapse_rates_np[:C] if lapse_rates_np.size >= C else np.zeros(C, dtype=float)
+                alternate_rates = (
+                    lapse_rates_np[C : 2 * C]
+                    if lapse_rates_np.size >= 2 * C
+                    else np.zeros(C, dtype=float)
+                )
+                repeat_rate = float(repeat_rates[prev])
+                alternate_rate = float(alternate_rates[prev])
+                repeat_target = np.zeros(C, dtype=float)
+                repeat_target[prev] = 1.0
+                alternate_target = np.full(C, 1.0 / max(1, C - 1), dtype=float)
+                alternate_target[prev] = 0.0
+                probs_t = (1.0 - repeat_rate - alternate_rate) * probs_t
+                probs_t += repeat_rate * repeat_target + alternate_rate * alternate_target
+            elif lapse_mode == "class" and lapse_rates_np.size:
+                total_mass = float(np.sum(lapse_rates_np))
+                probs_t = lapse_rates_np + (1.0 - total_mass) * probs_t
+
+            probs_t = np.clip(probs_t, 1e-12, 1.0)
+            probs_t /= probs_t.sum()
+            simulations[sim_idx, t] = int(rng.choice(C, p=probs_t))
+    return simulations
 
 
 def fit_glm(
