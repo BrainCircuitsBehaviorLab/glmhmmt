@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.8
+- Added simulation methods for the glms.
+- Added new mode to simulate MCDR.
+
 ## 0.2.7
 - Changed the pinned pyarrow version to increase compatibility.
 

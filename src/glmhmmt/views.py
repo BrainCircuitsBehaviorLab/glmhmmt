@@ -222,6 +222,11 @@ class SubjectFitView:
     U: Optional[np.ndarray] = None  # (T, D)
     U_cols: list[str] = field(default_factory=list)
     baseline_class_idx: int = 0
+    emission_model: str = "standard"
+    X_private: Optional[np.ndarray] = None  # (T, C, F_private)
+    private_weights: Optional[np.ndarray] = None  # (F_private,)
+    private_bias: Optional[np.ndarray] = None  # (C,)
+    private_feat_names: list[str] = field(default_factory=list)
 
     # ── derived helpers ───────────────────────────────────────────────────────
 
@@ -233,6 +238,8 @@ class SubjectFitView:
     @property
     def num_classes(self) -> int:
         """Number of choice classes (C)."""
+        if self.emission_model == "private_alternative" and self.X_private is not None:
+            return int(self.X_private.shape[1])
         return self.emission_weights.shape[1] + 1  # C-1 rows + reference class
 
     @property
@@ -260,6 +267,17 @@ class SubjectFitView:
         comparing posterior-weighted empirical summaries against model
         predictions within a latent state.
         """
+        if self.emission_model == "private_alternative":
+            if self.X_private is None or self.private_weights is None:
+                raise ValueError("private_alternative views require X_private and private_weights.")
+            logits = np.einsum("tcf,f->tc", self.X_private, self.private_weights)
+            if self.private_bias is not None:
+                logits = logits + self.private_bias[None, :]
+            logits = logits - logits.max(axis=-1, keepdims=True)
+            exp_logits = np.exp(logits)
+            probs = exp_logits / exp_logits.sum(axis=-1, keepdims=True)
+            return np.repeat(probs[:, None, :], self.K, axis=1)
+
         logits_ce = np.einsum("kcf,tf->tkc", self.emission_weights, self.X)  # (T, K, C-1)
         logits = _insert_reference_logit(logits_ce, self.baseline_class_idx)  # (T, K, C)
         logits = logits - logits.max(axis=-1, keepdims=True)
@@ -317,7 +335,12 @@ def build_views(
         d = arrays_store[subj]
         feat_names = list(d.get("X_cols", []))
         _W = np.asarray(d["emission_weights"])
-        C = int(_W.shape[1] + 1)
+        emission_model = str(np.asarray(d.get("emission_model", "standard")).reshape(()))
+        X_private = np.asarray(d["X_private"]) if "X_private" in d else None
+        private_weights = np.asarray(d["private_weights"]) if "private_weights" in d else None
+        private_bias = np.asarray(d["private_bias"]) if "private_bias" in d else None
+        private_feat_names = list(d.get("X_private_cols", []))
+        C = int(X_private.shape[1]) if emission_model == "private_alternative" and X_private is not None else int(_W.shape[1] + 1)
         if "baseline_class_idx" in d:
             baseline_class_idx = int(np.asarray(d["baseline_class_idx"]).reshape(()))
         else:
@@ -362,7 +385,7 @@ def build_views(
             K=K,
             smoothed_probs=np.asarray(d["smoothed_probs"]),
             emission_weights=_W,
-            X=np.asarray(d["X"]),
+            X=np.asarray(d["X"]) if "X" in d else np.asarray(X_private).mean(axis=1),
             y=np.asarray(d["y"]),
             feat_names=feat_names,
             state_name_by_idx={int(k): v for k, v in slbls.items()},
@@ -380,6 +403,11 @@ def build_views(
             U=np.asarray(d["U"]) if "U" in d else None,
             U_cols=u_cols,
             baseline_class_idx=baseline_class_idx,
+            emission_model=emission_model,
+            X_private=X_private,
+            private_weights=private_weights,
+            private_bias=private_bias,
+            private_feat_names=private_feat_names,
         )
 
     return views

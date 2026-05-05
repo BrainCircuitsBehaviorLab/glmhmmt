@@ -399,6 +399,243 @@ def simulate_glm_choices(
     return simulations
 
 
+@dataclass(frozen=True)
+class PrivateAlternativeGLMFitResult:
+    """Result of fitting a GLM with alternative-private regressors."""
+
+    private_weights: np.ndarray
+    private_bias: np.ndarray
+    predictive_probs: np.ndarray
+    negative_log_likelihood: float
+    success: bool
+    y: np.ndarray
+    X_private: np.ndarray
+    n_iter: int
+    nll_history: tuple[float, ...]
+
+    @property
+    def num_trials(self) -> int:
+        return int(self.X_private.shape[0])
+
+    @property
+    def num_classes(self) -> int:
+        return int(self.X_private.shape[1])
+
+
+def _validate_private_alternative_inputs(
+    X_private: ArrayLike,
+    y: ArrayLike,
+    *,
+    num_classes: int | None,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    X_np = np.asarray(X_private, dtype=float)
+    y_np = np.asarray(y, dtype=int).reshape(-1)
+
+    if X_np.ndim != 3:
+        raise ValueError(f"X_private must be a 3D array of shape (T, C, M); got ndim={X_np.ndim}.")
+    if not np.isfinite(X_np).all():
+        raise ValueError("X_private must contain only finite values.")
+    if y_np.ndim != 1:
+        raise ValueError(f"y must be a 1D array of shape (T,); got ndim={y_np.ndim}.")
+    if X_np.shape[0] != y_np.shape[0]:
+        raise ValueError(
+            "X_private and y must have the same number of trials; "
+            f"got X_private.shape[0]={X_np.shape[0]} and y.shape[0]={y_np.shape[0]}."
+        )
+
+    resolved_num_classes = int(num_classes) if num_classes is not None else int(X_np.shape[1])
+    if X_np.shape[1] != resolved_num_classes:
+        raise ValueError(
+            f"X_private has {X_np.shape[1]} alternatives but num_classes={resolved_num_classes}."
+        )
+    if resolved_num_classes < 2:
+        raise ValueError(f"num_classes must be at least 2; got {resolved_num_classes}.")
+    if y_np.size and y_np.min() < 0:
+        raise ValueError("y must contain non-negative class indices.")
+    if y_np.size and y_np.max() >= resolved_num_classes:
+        raise ValueError(
+            f"y contains class index {int(y_np.max())}, but num_classes={resolved_num_classes}."
+        )
+    return X_np, y_np, resolved_num_classes
+
+
+def private_alternative_logits(
+    X_private: ArrayLike,
+    private_weights: ArrayLike,
+    private_bias: ArrayLike | None = None,
+) -> np.ndarray:
+    """Compute logits for a shared-weight alternative-private GLM."""
+    X_np = np.asarray(X_private, dtype=float)
+    weights = np.asarray(private_weights, dtype=float).reshape(-1)
+    if X_np.ndim != 3:
+        raise ValueError(f"X_private must be a 3D array of shape (T, C, M); got shape {X_np.shape}.")
+    if X_np.shape[2] != weights.shape[0]:
+        raise ValueError(f"X_private has {X_np.shape[2]} features but private_weights has {weights.shape[0]}.")
+    logits = np.einsum("tcm,m->tc", X_np, weights)
+    if private_bias is not None:
+        bias = np.asarray(private_bias, dtype=float).reshape(-1)
+        if bias.shape[0] != X_np.shape[1]:
+            raise ValueError(f"private_bias has {bias.shape[0]} classes but X_private has {X_np.shape[1]}.")
+        logits = logits + bias[None, :]
+    return logits
+
+
+def private_alternative_probs(
+    X_private: ArrayLike,
+    private_weights: ArrayLike,
+    private_bias: ArrayLike | None = None,
+) -> np.ndarray:
+    """Compute probabilities for a shared-weight alternative-private GLM."""
+    return softmax(private_alternative_logits(X_private, private_weights, private_bias), axis=1)
+
+
+def fit_private_alternative_glm(
+    X_private: ArrayLike,
+    y: ArrayLike,
+    *,
+    num_classes: int | None = None,
+    include_bias: bool = True,
+    bias_reference_class_idx: int = 1,
+    maxiter: int = 100,
+    tol: float = 1e-7,
+    ridge: float = 1e-6,
+    initial_weights: ArrayLike | None = None,
+    initial_bias: ArrayLike | None = None,
+) -> PrivateAlternativeGLMFitResult:
+    """Fit a multinomial GLM with per-alternative regressors and shared weights.
+
+    The model is ``softmax(b_i + w @ X_private[t, i])``.  When
+    ``include_bias`` is true, all classes except ``bias_reference_class_idx``
+    get a fitted fixed bias.
+    """
+    X_np, y_np, resolved_num_classes = _validate_private_alternative_inputs(
+        X_private,
+        y,
+        num_classes=num_classes,
+    )
+    reference = _validate_baseline_class_idx(resolved_num_classes, bias_reference_class_idx)
+    T, C, M = X_np.shape
+    bias_classes = [idx for idx in range(C) if idx != reference] if include_bias else []
+    n_bias = len(bias_classes)
+    n_params = n_bias + M
+
+    theta = np.zeros(n_params, dtype=float)
+    if initial_bias is not None and include_bias:
+        init_bias = np.asarray(initial_bias, dtype=float).reshape(-1)
+        if init_bias.shape[0] != C:
+            raise ValueError(f"initial_bias has {init_bias.shape[0]} classes but num_classes={C}.")
+        theta[:n_bias] = init_bias[bias_classes]
+    if initial_weights is not None:
+        init_weights = np.asarray(initial_weights, dtype=float).reshape(-1)
+        if init_weights.shape[0] != M:
+            raise ValueError(f"initial_weights has {init_weights.shape[0]} entries but X_private has {M} features.")
+        theta[n_bias:] = init_weights
+
+    y_onehot = np.zeros((T, C), dtype=float)
+    if T > 0:
+        y_onehot[np.arange(T), y_np] = 1.0
+
+    def unpack(params: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        bias = np.zeros(C, dtype=float)
+        if include_bias:
+            bias[bias_classes] = params[:n_bias]
+        weights = params[n_bias:]
+        return bias, weights
+
+    def objective(params: np.ndarray) -> float:
+        bias, weights = unpack(params)
+        probs = np.clip(private_alternative_probs(X_np, weights, bias), 1e-12, 1.0)
+        return -float(np.sum(np.log(probs[np.arange(T), y_np]))) if T > 0 else float("nan")
+
+    def design_tensor() -> np.ndarray:
+        z = np.zeros((T, C, n_params), dtype=float)
+        if include_bias:
+            for param_idx, class_idx in enumerate(bias_classes):
+                z[:, class_idx, param_idx] = 1.0
+        z[:, :, n_bias:] = X_np
+        return z
+
+    Z = design_tensor()
+    nll_history: list[float] = []
+    success = False
+    if T == 0:
+        bias, weights = unpack(theta)
+        return PrivateAlternativeGLMFitResult(
+            private_weights=weights,
+            private_bias=bias,
+            predictive_probs=np.empty((0, C), dtype=float),
+            negative_log_likelihood=float("nan"),
+            success=False,
+            y=y_np,
+            X_private=X_np,
+            n_iter=0,
+            nll_history=tuple(),
+        )
+
+    current_nll = objective(theta)
+    nll_history.append(current_nll)
+    n_iter = 0
+    damping = float(max(ridge, 1e-12))
+
+    for iter_idx in range(1, int(maxiter) + 1):
+        bias, weights = unpack(theta)
+        probs = private_alternative_probs(X_np, weights, bias)
+        residual = probs - y_onehot
+        grad = np.einsum("tc,tcp->p", residual, Z)
+        cov = np.eye(C, dtype=float)[None, :, :] * probs[:, :, None] - probs[:, :, None] * probs[:, None, :]
+        hess = np.einsum("tcp,tcq,tqr->pr", Z, cov, Z)
+        hess = hess + damping * np.eye(n_params, dtype=float)
+        try:
+            step = np.linalg.solve(hess, grad)
+        except np.linalg.LinAlgError:
+            step = np.linalg.lstsq(hess, grad, rcond=None)[0]
+
+        grad_norm = float(np.linalg.norm(grad, ord=2))
+        if grad_norm < tol:
+            success = True
+            n_iter = iter_idx - 1
+            break
+
+        accepted = False
+        step_scale = 1.0
+        for _ in range(25):
+            candidate = theta - step_scale * step
+            candidate_nll = objective(candidate)
+            if np.isfinite(candidate_nll) and candidate_nll <= current_nll + 1e-10:
+                theta = candidate
+                current_nll = candidate_nll
+                nll_history.append(current_nll)
+                accepted = True
+                break
+            step_scale *= 0.5
+
+        n_iter = iter_idx
+        if not accepted:
+            break
+        if len(nll_history) >= 2 and abs(nll_history[-2] - nll_history[-1]) < tol:
+            success = True
+            break
+    else:
+        success = True
+
+    bias, weights = unpack(theta)
+    probs = private_alternative_probs(X_np, weights, bias)
+    probs = np.clip(probs, 1e-12, 1.0)
+    probs /= probs.sum(axis=1, keepdims=True)
+    final_nll = objective(theta)
+    return PrivateAlternativeGLMFitResult(
+        private_weights=weights,
+        private_bias=bias,
+        predictive_probs=probs,
+        negative_log_likelihood=final_nll,
+        success=bool(success),
+        y=y_np,
+        X_private=X_np,
+        n_iter=int(n_iter),
+        nll_history=tuple(float(v) for v in nll_history),
+    )
+
+
 def fit_glm(
     X: ArrayLike,
     y: ArrayLike,

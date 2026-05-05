@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
-from glmhmmt.glm import fit_glm
+from glmhmmt.glm import fit_glm, fit_private_alternative_glm
 from glmhmmt.runtime import (
     add_runtime_path_args,
     configure_paths_from_args,
@@ -51,6 +51,7 @@ def fit_subject(
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
     condition_filter: str = "all",
+    emission_model: str = "standard",
 ) -> dict:
     """Fit a GLM (K=1) to a single subject."""
 
@@ -65,6 +66,57 @@ def fit_subject(
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
     if len(df_sub) == 0:
         return None
+    emission_model = str(emission_model or "standard").strip().lower()
+    if emission_model == "private_alternative":
+        if not hasattr(adapter, "build_private_design_matrices"):
+            raise ValueError(f"Task {task!r} does not support emission_model='private_alternative'.")
+        feature_df = adapter.build_feature_df(df_sub, tau=tau)
+        y, X_private, _, names = adapter.build_private_design_matrices(feature_df)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "restart_start",
+                    "restart_index": 1,
+                    "restart_total": 1,
+                }
+            )
+        fit = fit_private_alternative_glm(
+            X_private,
+            y,
+            num_classes=num_classes,
+            include_bias=True,
+            bias_reference_class_idx=getattr(adapter, "baseline_class_idx", baseline_class_idx),
+        )
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "restart_complete",
+                    "restart_index": 1,
+                    "restart_total": 1,
+                    "negative_log_likelihood": fit.negative_log_likelihood,
+                    "success": fit.success,
+                }
+            )
+        return {
+            "subject": subject,
+            "emission_model": "private_alternative",
+            "private_weights": fit.private_weights,
+            "private_bias": fit.private_bias,
+            "p_pred": fit.predictive_probs,
+            "nll": fit.negative_log_likelihood,
+            "success": fit.success,
+            "y": fit.y,
+            "X_private": fit.X_private,
+            "names": names,
+            "T": fit.num_trials,
+            "baseline_class_idx": int(getattr(adapter, "baseline_class_idx", baseline_class_idx)),
+            "n_iter": fit.n_iter,
+            "nll_history": np.asarray(fit.nll_history, dtype=float),
+        }
+
+    if emission_model != "standard":
+        raise ValueError("emission_model must be one of: standard, private_alternative.")
+
     y, X, _, names = adapter.load_subject(df_sub, tau=tau, emission_cols=emission_cols)
     fit = fit_glm(
         X,
@@ -81,6 +133,7 @@ def fit_subject(
 
     return {
         "subject": subject,
+        "emission_model": "standard",
         "W": fit.weights,              # (C, M)
         "p_pred": fit.predictive_probs,         # (T, C)
         "lapse_rates": fit.lapse_rates,
@@ -103,6 +156,63 @@ def save_results(result: dict, out_dir: Path, tau: float):
     
     # Save as {subj}_glm_arrays.npz
     prefix = out_dir / f"{subj}_glm"
+    emission_model = str(result.get("emission_model", "standard"))
+
+    if emission_model == "private_alternative":
+        p_pred = np.asarray(result["p_pred"], dtype=float)
+        y = np.asarray(result["y"], dtype=int)
+        T = int(result["T"])
+        C = int(p_pred.shape[1])
+        private_weights = np.asarray(result["private_weights"], dtype=float)
+        private_bias = np.asarray(result["private_bias"], dtype=float)
+        baseline_class_idx = int(result.get("baseline_class_idx", 1))
+        dummy_emission_weights = np.zeros((1, max(C - 1, 1), private_weights.shape[0]), dtype=np.float32)
+
+        np.savez(
+            str(prefix) + "_arrays.npz",
+            emission_model=np.array("private_alternative"),
+            private_weights=private_weights,
+            private_bias=private_bias,
+            X_private=np.asarray(result["X_private"], dtype=np.float32),
+            X=np.asarray(result["X_private"], dtype=np.float32).mean(axis=1),
+            X_private_cols=np.array(result["names"].get("X_private_cols", []), dtype=object),
+            X_cols=np.array(result["names"].get("X_private_cols", []), dtype=object),
+            alternative_order=np.array(result["names"].get("alternative_order", ["L", "C", "R"]), dtype=object),
+            emission_weights=dummy_emission_weights,
+            p_pred=p_pred,
+            y=y,
+            smoothed_probs=np.ones((T, 1)),
+            predictive_state_probs=np.ones((T, 1)),
+            initial_probs=np.ones(1),
+            transition_matrix=np.ones((1, 1)),
+            baseline_class_idx=np.array(baseline_class_idx),
+            success=result["success"],
+            nll_history=np.asarray(result.get("nll_history", []), dtype=float),
+            n_iter=np.array(int(result.get("n_iter", 0))),
+        )
+
+        raw_ll = -float(result["nll"]) if T > 0 else np.nan
+        ll_per_trial = raw_ll / T if T > 0 else np.nan
+        acc = float(np.mean(np.argmax(p_pred, axis=1) == y)) if T > 0 else 0.0
+        k = int(private_weights.shape[0] + 2)
+        bic = k * np.log(T) + 2 * result["nll"] if T > 0 else np.nan
+        pl.DataFrame({
+            "subject": [subj],
+            "model_kind": ["glm"],
+            "emission_model": ["private_alternative"],
+            "tau": [tau],
+            "nll": [result["nll"]],
+            "raw_ll": [raw_ll],
+            "ll_per_trial": [ll_per_trial],
+            "bic": [bic],
+            "acc": [acc],
+            "k": [k],
+            "n_trials": [T],
+            "baseline_class_idx": [baseline_class_idx],
+            "success": [bool(result["success"])],
+            "n_iter": [int(result.get("n_iter", 0))],
+        }).write_parquet(str(prefix) + "_metrics.parquet")
+        return
     
     W_full = result["W"]
     C, M = W_full.shape
@@ -126,6 +236,7 @@ def save_results(result: dict, out_dir: Path, tau: float):
         lapse_rates=result.get("lapse_rates", np.zeros(C)),
         lapse_mode=result.get("lapse_mode", "none"),
         lapse_labels=np.asarray(result.get("lapse_labels", []), dtype=str),
+        emission_model=np.array("standard"),
         baseline_class_idx=np.array(int(baseline_class_idx)),
         success=result["success"],
     )
@@ -141,6 +252,7 @@ def save_results(result: dict, out_dir: Path, tau: float):
     pl.DataFrame({
         "subject": [subj],
         "model_kind": ["glm"],
+        "emission_model": ["standard"],
         "tau": [tau],
         "nll": [result["nll"]],
         "raw_ll": [raw_ll],
@@ -164,6 +276,7 @@ def generate_model_id(
     seed: int | None = 0,
     baseline_class_idx: int = 0,
     condition_filter: str = "all",
+    emission_model: str = "standard",
 ):
     cols = sorted(emission_cols) if emission_cols else []
     config = {
@@ -172,6 +285,7 @@ def generate_model_id(
         "emission_cols": cols,
         "lapse_mode": str(lapse_mode),
         "baseline_class_idx": int(baseline_class_idx),
+        "emission_model": str(emission_model),
     }
     if lapse_mode != "none":
         config["lapse_max"] = float(lapse_max)
@@ -200,10 +314,14 @@ def main(
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
     condition_filter: str = "all",
+    emission_model: str = "standard",
 ):
     # Compute base output directory
     base_out_dir = get_results_dir() / "fits" / task / "glm"
     requested_emission_cols = list(emission_cols) if emission_cols is not None else None
+    emission_model = str(emission_model or "standard").strip().lower()
+    if emission_model == "private_alternative":
+        baseline_class_idx = int(getattr(get_adapter(task), "baseline_class_idx", baseline_class_idx))
 
     # Generate Hash
     model_hash = generate_model_id(
@@ -217,6 +335,7 @@ def main(
         seed=seed,
         baseline_class_idx=baseline_class_idx,
         condition_filter=condition_filter,
+        emission_model=emission_model,
     )
     out_dirs = [base_out_dir / model_hash]
 
@@ -284,6 +403,7 @@ def main(
                     "restart_noise_scale": restart_noise_scale,
                     "seed": seed,
                     "baseline_class_idx": int(baseline_class_idx),
+                    "emission_model": emission_model,
                     "model_id": d.name,
                     **(
                         {"condition_filter": condition_filter}
@@ -329,6 +449,7 @@ def main(
                 progress_callback=_progress if progress_callback is not None else None,
                 baseline_class_idx=baseline_class_idx,
                 condition_filter=condition_filter,
+                emission_model=emission_model,
             )
             for d in out_dirs:
                 save_results(res, d, tau)
@@ -378,6 +499,13 @@ if __name__ == "__main__":
         default="all",
         help="Task-specific condition subset, for example rest or drug for 2AFC_DRUG.",
     )
+    parser.add_argument(
+        "--emission_model",
+        type=str,
+        default="standard",
+        choices=["standard", "private_alternative"],
+        help="Emission model to fit. private_alternative is currently supported for MCDR GLMs.",
+    )
 
     args = parser.parse_args()
     configure_paths_from_args(args)
@@ -396,4 +524,5 @@ if __name__ == "__main__":
         seed=args.seed,
         baseline_class_idx=args.baseline_class_idx,
         condition_filter=args.condition_filter,
+        emission_model=args.emission_model,
     )

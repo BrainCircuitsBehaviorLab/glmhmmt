@@ -199,13 +199,16 @@ def build_trial_df(
     p_state_conditional = view.state_conditional_probs()  # (T, K, C)
 
     # ── MAP-state emission probabilities ──────────────────────────────────────
-    p_map = _emission_probs(
-        view.emission_weights,
-        view.X,
-        map_k,
-        C,
-        baseline_class_idx=view.baseline_class_idx,
-    )  # (T, C)
+    if getattr(view, "emission_model", "standard") == "private_alternative":
+        p_map = p_state_conditional[np.arange(T), map_k, :]
+    else:
+        p_map = _emission_probs(
+            view.emission_weights,
+            view.X,
+            map_k,
+            C,
+            baseline_class_idx=view.baseline_class_idx,
+        )  # (T, C)
 
     correct_class = adapter.get_correct_class(df_out)
     if np.any((correct_class < 0) | (correct_class >= C)):
@@ -296,6 +299,44 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
     """
     records: list[dict] = []
     for subj, view in views.items():
+        if getattr(view, "emission_model", "standard") == "private_alternative":
+            lbl = view.state_name_by_idx.get(0, "State 0")
+            rank = view.state_rank_by_idx.get(0, 0)
+            feature_names = list(getattr(view, "private_feat_names", []) or getattr(view, "feat_names", []))
+            private_weights = np.asarray(view.private_weights, dtype=float)
+            for fi, fname in enumerate(feature_names[: private_weights.shape[0]]):
+                records.append(
+                    {
+                        "subject": subj,
+                        "state_idx": 0,
+                        "state_label": lbl,
+                        "state_rank": rank,
+                        "class_idx": -1,
+                        "weight_row_idx": -1,
+                        "baseline_class_idx": int(view.baseline_class_idx),
+                        "feature": str(fname),
+                        "weight": float(private_weights[fi]),
+                        "emission_model": "private_alternative",
+                    }
+                )
+            private_bias = np.asarray(view.private_bias if view.private_bias is not None else [], dtype=float)
+            for class_idx, bias in enumerate(private_bias):
+                records.append(
+                    {
+                        "subject": subj,
+                        "state_idx": 0,
+                        "state_label": lbl,
+                        "state_rank": rank,
+                        "class_idx": int(class_idx),
+                        "weight_row_idx": int(class_idx),
+                        "baseline_class_idx": int(view.baseline_class_idx),
+                        "feature": f"bias_{class_idx}",
+                        "weight": float(bias),
+                        "emission_model": "private_alternative",
+                    }
+                )
+            continue
+
         W = view.emission_weights  # (K, C-1, F)
         class_indices = explicit_class_indices(view.num_classes, view.baseline_class_idx)
         for k in range(view.K):
@@ -314,6 +355,7 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
                             "baseline_class_idx": int(view.baseline_class_idx),
                             "feature": fname,
                             "weight": float(W[k, row_idx, fi]),
+                            "emission_model": "standard",
                         }
                     )
     if not records:
