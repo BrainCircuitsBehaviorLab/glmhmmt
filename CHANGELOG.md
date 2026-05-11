@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.9
+- Updated the session plot to match the states correctly.
+
 ## 0.2.8
 - Added simulation methods for the glms.
 - Added new mode to simulate MCDR.

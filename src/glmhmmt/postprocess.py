@@ -174,12 +174,26 @@ def build_trial_df(
     # ── add emission-feature columns from the fitted design matrix ───────────
     # This keeps trial_df aligned with the exact regressors used to build X,
     # so downstream plotting can access columns such as `at_choice`.
-    X_arr = np.asarray(view.X, dtype=np.float64)
     feature_cols = []
-    for fi, fname in enumerate(list(view.feat_names or [])):
-        if fi >= X_arr.shape[1] or fname in df_out.columns:
-            continue
-        feature_cols.append(pl.Series(fname, X_arr[:, fi]))
+    if getattr(view, "emission_model", "standard") == "private_alternative":
+        X_private = np.asarray(view.X_private, dtype=np.float64) if view.X_private is not None else None
+        private_names = list(getattr(view, "private_feat_names", []) or [])
+        alternative_order = list(getattr(view, "alternative_order", []) or [])
+        if X_private is not None:
+            if len(alternative_order) != X_private.shape[1]:
+                alternative_order = [f"class_{idx}" for idx in range(X_private.shape[1])]
+            for fi, fname in enumerate(private_names[: X_private.shape[2]]):
+                for class_idx, alt_name in enumerate(alternative_order):
+                    col_name = f"private_{fname}_{alt_name}"
+                    if col_name in df_out.columns:
+                        continue
+                    feature_cols.append(pl.Series(col_name, X_private[:, class_idx, fi]))
+    else:
+        X_arr = np.asarray(view.X, dtype=np.float64)
+        for fi, fname in enumerate(list(view.feat_names or [])):
+            if fi >= X_arr.shape[1] or fname in df_out.columns:
+                continue
+            feature_cols.append(pl.Series(fname, X_arr[:, fi]))
     if feature_cols:
         df_out = df_out.with_columns(feature_cols)
 
@@ -1300,6 +1314,7 @@ def build_session_deepdive_payload(
     *,
     subject,
     session,
+    views: dict | None = None,
     session_col: str = "session",
     sort_col: str = "trial_idx",
     trace_cols: list[str] | None = None,
@@ -1316,9 +1331,23 @@ def build_session_deepdive_payload(
     pcols = _posterior_cols(df)
     if not pcols:
         raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
-    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_df = df[df["subject"].astype(str) == str(subject)].copy()
+    if subject_df.empty:
+        raise ValueError(f"No rows found for subject={subject!r}.")
+    subject_view = None
+    if views:
+        subject_view = views.get(subject) or views.get(str(subject))
+    if subject_view is not None:
+        label_by_idx = {int(k): str(v) for k, v in subject_view.state_name_by_idx.items()}
+        rank_by_idx = {int(k): int(v) for k, v in subject_view.state_rank_by_idx.items()}
+        state_order = [
+            label_by_idx[idx]
+            for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
+        ]
+    else:
+        state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(subject_df)
     engaged_idx = _infer_engaged_state_idx(label_by_idx, rank_by_idx)
-    work = df[(df["subject"].astype(str) == str(subject)) & (df[session_col] == session)].copy()
+    work = subject_df[subject_df[session_col] == session].copy()
     if work.empty:
         raise ValueError(f"No rows found for subject={subject!r}, session={session!r}.")
     work = work.sort_values(sort_col).copy()

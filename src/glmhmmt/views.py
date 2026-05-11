@@ -227,6 +227,7 @@ class SubjectFitView:
     private_weights: Optional[np.ndarray] = None  # (F_private,)
     private_bias: Optional[np.ndarray] = None  # (C,)
     private_feat_names: list[str] = field(default_factory=list)
+    alternative_order: list[str] = field(default_factory=list)
 
     # ── derived helpers ───────────────────────────────────────────────────────
 
@@ -340,6 +341,7 @@ def build_views(
         private_weights = np.asarray(d["private_weights"]) if "private_weights" in d else None
         private_bias = np.asarray(d["private_bias"]) if "private_bias" in d else None
         private_feat_names = list(d.get("X_private_cols", []))
+        alternative_order = [str(v) for v in np.asarray(d.get("alternative_order", [])).tolist()]
         C = int(X_private.shape[1]) if emission_model == "private_alternative" and X_private is not None else int(_W.shape[1] + 1)
         if "baseline_class_idx" in d:
             baseline_class_idx = int(np.asarray(d["baseline_class_idx"]).reshape(()))
@@ -354,7 +356,7 @@ def build_views(
                 f"Subject {subj!r}: baseline_class_idx={baseline_class_idx} "
                 f"is invalid for {C} classes."
             )
-        feat_names = feat_names[: _W.shape[2]]
+        feat_names = [] if emission_model == "private_alternative" else feat_names[: _W.shape[2]]
         slbls = state_labels.get(subj, {k: f"State {k}" for k in range(K)})
         sorder = state_order.get(subj, list(range(K)))
 
@@ -408,6 +410,7 @@ def build_views(
             private_weights=private_weights,
             private_bias=private_bias,
             private_feat_names=private_feat_names,
+            alternative_order=alternative_order,
         )
 
     return views
