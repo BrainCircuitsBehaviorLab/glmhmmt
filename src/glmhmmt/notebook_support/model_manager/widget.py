@@ -135,6 +135,30 @@ def _summarize_selected_regressors(selected_cols: list[str], groups: list[dict])
     return summary
 
 
+def _is_one_hot_freeze_group(group: dict) -> bool:
+    key = str(group.get("key", "")).lower()
+    label = str(group.get("label", "")).lower()
+    return "hot" in key or "hot" in label or "one-hot" in label
+
+
+def _members_for_group(group: dict) -> list[str]:
+    toggle_members = group.get("toggle_members")
+    if isinstance(toggle_members, list) and toggle_members:
+        return [str(member) for member in toggle_members]
+    members = group.get("members", {})
+    if isinstance(members, dict):
+        return [str(member) for member in members.values()]
+    return []
+
+
+def _freezeable_emission_cols(emission_cols: list[str], groups: list[dict]) -> list[str]:
+    excluded: set[str] = set()
+    for group in groups:
+        if _is_one_hot_freeze_group(group):
+            excluded.update(_members_for_group(group))
+    return [col for col in emission_cols if col not in excluded]
+
+
 def _format_emission_regressor_summary(task: str, emission_cols: list[str]) -> str:
     try:
         groups = get_adapter(task).build_emission_groups(list(emission_cols))
@@ -329,7 +353,8 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 self.frozen_emissions = {}
             return
 
-        pruned = prune_frozen_emissions(self.frozen_emissions, int(self.K), list(self.emission_cols))
+        freezeable_cols = _freezeable_emission_cols(list(self.emission_cols), list(self.emission_groups))
+        pruned = prune_frozen_emissions(self.frozen_emissions, int(self.K), freezeable_cols)
         if pruned != self.frozen_emissions:
             self.frozen_emissions = pruned
 

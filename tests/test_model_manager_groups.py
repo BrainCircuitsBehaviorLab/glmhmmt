@@ -12,7 +12,7 @@ importlib.import_module("src.process.two_afc_delay")
 importlib.import_module("src.process.MCDR")
 
 from glmhmmt.notebook_support.model_manager import widget as widget_module
-from glmhmmt.notebook_support.model_manager.widget import _build_2afc_emission_groups
+from glmhmmt.notebook_support.model_manager.widget import _build_2afc_emission_groups, _freezeable_emission_cols
 
 
 def test_build_2afc_emission_groups_hides_one_hot_members():
@@ -52,6 +52,44 @@ def test_build_2afc_emission_groups_hides_one_hot_members():
     assert by_key["bias"]["members"] == {"N": "bias"}
     assert by_key["stim_param"]["members"] == {"N": "stim_param"}
     assert by_key["at_choice_param"]["members"] == {"N": "at_choice_param"}
+
+
+def test_freezeable_emission_cols_excludes_one_hot_families():
+    groups = _build_2afc_emission_groups(
+        [
+            "bias",
+            "bias_param",
+            "bias_0",
+            "bias_1",
+            "stim_param",
+            "stim_2",
+            "stim_4",
+            "at_choice_param",
+            "choice_lag_01",
+            "choice_lag_02",
+        ]
+    )
+
+    assert _freezeable_emission_cols(
+        [
+            "bias",
+            "bias_0",
+            "bias_1",
+            "stim_param",
+            "stim_2",
+            "stim_4",
+            "at_choice_param",
+            "choice_lag_01",
+            "choice_lag_02",
+        ],
+        groups,
+    ) == [
+        "bias",
+        "stim_param",
+        "at_choice_param",
+        "choice_lag_01",
+        "choice_lag_02",
+    ]
 
 
 def test_refresh_groups_uses_hidden_families_for_2afc_delay(monkeypatch, tmp_path: Path):

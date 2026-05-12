@@ -35,6 +35,23 @@ function selectedState(selectedSet, members) {
   return "partial";
 }
 
+function isOneHotFreezeGroup(group) {
+  const key = String(group?.key || "").toLowerCase();
+  const label = String(group?.label || "").toLowerCase();
+  return key.includes("hot") || label.includes("hot") || label.includes("one-hot");
+}
+
+function featuresForFreezeTable(selectedFeatures, groups) {
+  const excluded = new Set();
+  (groups || []).forEach((group) => {
+    if (!isOneHotFreezeGroup(group)) {
+      return;
+    }
+    membersForGroup(group).forEach((member) => excluded.add(member));
+  });
+  return (selectedFeatures || []).filter((feature) => !excluded.has(feature));
+}
+
 function renderSelectAll(subjectsList, currentSubjects) {
   const total = subjectsList.length;
   const count = currentSubjects.length;
@@ -429,10 +446,11 @@ function render({ model, el }) {
       `;
 
       if (modelType !== "glm") {
+        const frozenFeatures = featuresForFreezeTable(currentEmission, emissionGroups);
         html += `
           <div class="mm-section">
             <label class="mm-label">Frozen Emission Weights</label>
-            ${renderFrozenTable(currentK, currentEmission, currentFrozen)}
+            ${renderFrozenTable(currentK, frozenFeatures, currentFrozen)}
           </div>
         `;
       }

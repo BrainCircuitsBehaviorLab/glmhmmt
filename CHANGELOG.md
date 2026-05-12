@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.10
+- Updated the frozen emissions selector to hide the one hot families.
+
 ## 0.2.9
 - Updated the session plot to match the states correctly.
 
