@@ -360,6 +360,7 @@ def emission_weights_by_subject(
     axes: Sequence[plt.Axes] | None = None,
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
+    tick_rotation: float = 35,
 ) -> tuple[plt.Figure, np.ndarray]:
     """Plot subject-wise emission weights for one selected class.
 
@@ -394,6 +395,8 @@ def emission_weights_by_subject(
         Figure size used only when creating a new figure internally.
     title
         Optional figure title.
+    tick_rotation
+        Rotation angle, in degrees, for x-axis feature labels.
 
     Returns
     -------
@@ -459,7 +462,11 @@ def emission_weights_by_subject(
         ax.set_xlabel("")
         ax.set_ylabel("Weight")
         ax.set_title(f"Subject {subject}")
-        plt.setp(ax.get_xticklabels(), rotation=35, ha="right")
+        plt.setp(
+            ax.get_xticklabels(),
+            rotation=tick_rotation,
+            ha="right" if tick_rotation else "center",
+        )
 
     for idx in range(len(subjects), n_panels):
         axes[idx].set_visible(False)
@@ -489,6 +496,7 @@ def emission_weights_summary_lineplot(
     ax: plt.Axes | None = None,
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
+    tick_rotation: float = 35,
 ) -> plt.Axes:
     """Plot a summary line plot of emission weights for one selected class.
 
@@ -522,6 +530,8 @@ def emission_weights_summary_lineplot(
         Figure size used only when creating a new figure internally.
     title
         Optional axis title.
+    tick_rotation
+        Rotation angle, in degrees, for x-axis feature labels.
 
     Returns
     -------
@@ -558,6 +568,11 @@ def emission_weights_summary_lineplot(
     ax.axhline(0, color="k", lw=0.8, ls="--")
     ax.set_xlabel("")
     ax.set_ylabel("Weight")
+    plt.setp(
+        ax.get_xticklabels(),
+        rotation=tick_rotation,
+        ha="right" if tick_rotation else "center",
+    )
     if title is not None:
         ax.set_title(title)
     ax.legend(frameon=False, bbox_to_anchor=(1.01, 1), loc="upper left")
@@ -585,6 +600,7 @@ def emission_weights_summary_boxplot(
     subject_line_color: str = "#7A7A7A",
     subject_line_alpha: float = 0.15,
     subject_line_width: float = 1.0,
+    tick_rotation: float = 35,
 ) -> plt.Axes:
     """Plot a summary boxplot of emission weights.
 
@@ -632,6 +648,8 @@ def emission_weights_summary_boxplot(
         Alpha used for subject-connecting lines.
     subject_line_width
         Line width used for subject-connecting lines.
+    tick_rotation
+        Rotation angle, in degrees, for x-axis feature labels.
 
     Returns
     -------
@@ -706,7 +724,11 @@ def emission_weights_summary_boxplot(
 
     ax.axhline(0, color="k", lw=0.8, ls="--")
     ax.set_xticks(range(n_features))
-    ax.set_xticklabels(display_features, rotation=35, ha="right")
+    ax.set_xticklabels(
+        display_features,
+        rotation=tick_rotation,
+        ha="right" if tick_rotation else "center",
+    )
     ax.set_xlabel("")
     ax.set_ylabel("Weight")
     if title is not None:

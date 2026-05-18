@@ -1,7 +1,11 @@
 # Changelog
 
-## 0.2.11
-- Updated transition coefficients boxplots to follow the same styling as emissions.
+## 0.2.13
+- Added `tick_rotation` support to emission- and transition-weight plot helpers.
+
+## 0.2.12
+- Added standardized transition-weight DataFrame building and common transition-weight plot helpers for by-subject, summary line, and summary boxplot views.
+- Updated GLM-HMM-T analysis transition-weight plots to use the same DataFrame-based styling as emission weights.
 
 ## 0.2.11
 - Fixed GLM-HMM and GLM-HMM-T CV fits to reuse resolved emission columns and zero-fill split-local one-hot regressors, preventing train/test shape mismatches with dynamic bias-hot columns.

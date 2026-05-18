@@ -25,6 +25,7 @@ def transition_weights_by_subject(
     axes: Sequence[plt.Axes] | None = None,
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
+    tick_rotation: float = 35,
 ) -> tuple[plt.Figure, np.ndarray]:
     """Plot subject-wise transition weights with the emission-weight style."""
     fig, axes_grid = emission_weights_by_subject(
@@ -37,6 +38,7 @@ def transition_weights_by_subject(
         axes=axes,
         figsize=figsize,
         title=title,
+        tick_rotation=tick_rotation,
     )
     for ax in np.asarray(axes_grid, dtype=object).ravel():
         if ax.get_visible():
@@ -55,6 +57,7 @@ def transition_weights_summary_lineplot(
     ax: plt.Axes | None = None,
     figsize: tuple[float, float] | None = None,
     title: str | None = None,
+    tick_rotation: float = 35,
 ) -> plt.Axes:
     """Plot transition-weight means with the emission summary-line style."""
     ax = emission_weights_summary_lineplot(
@@ -67,6 +70,7 @@ def transition_weights_summary_lineplot(
         ax=ax,
         figsize=figsize,
         title=title,
+        tick_rotation=tick_rotation,
     )
     ax.set_ylabel("Transition weight")
     return ax
@@ -88,6 +92,7 @@ def transition_weights_summary_boxplot(
     subject_line_color: str = "#7A7A7A",
     subject_line_alpha: float = 0.15,
     subject_line_width: float = 1.0,
+    tick_rotation: float = 35,
 ) -> plt.Axes:
     """Plot transition-weight distributions with the emission boxplot style."""
     ax = emission_weights_summary_boxplot(
@@ -105,6 +110,7 @@ def transition_weights_summary_boxplot(
         subject_line_color=subject_line_color,
         subject_line_alpha=subject_line_alpha,
         subject_line_width=subject_line_width,
+        tick_rotation=tick_rotation,
     )
     ax.set_ylabel("Transition weight")
     return ax

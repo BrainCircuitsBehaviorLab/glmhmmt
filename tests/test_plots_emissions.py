@@ -55,3 +55,10 @@ def test_emission_weights_summary_boxplot_class_idx_keeps_raw_weights():
 
     assert [tick.get_text() for tick in ax.get_xticklabels()] == ["SL", "SR", "SC"]
     assert ax.get_ylabel() == "Weight"
+
+
+def test_emission_weights_summary_boxplot_accepts_tick_rotation():
+    ax = emission_weights_summary_boxplot(_three_choice_weights_df(), K=2, tick_rotation=0)
+
+    assert ax.get_xticklabels()[0].get_rotation() == 0
+    assert ax.get_xticklabels()[0].get_ha() == "center"

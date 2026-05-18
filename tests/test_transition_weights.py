@@ -74,3 +74,16 @@ def test_transition_weight_plots_use_emission_style_dataframe():
 
     fig_subjects.clf()
     ax_summary.figure.clf()
+
+
+def test_transition_weight_plots_forward_tick_rotation():
+    weights_df = build_transition_weights_df(
+        {"s1": _view("s1"), "s2": _view("s2", offset=1.0)}
+    )
+
+    ax_summary = transition_weights_summary_boxplot(weights_df, K=2, tick_rotation=0)
+
+    assert ax_summary.get_xticklabels()[0].get_rotation() == 0
+    assert ax_summary.get_xticklabels()[0].get_ha() == "center"
+
+    ax_summary.figure.clf()
