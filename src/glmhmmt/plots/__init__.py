@@ -37,6 +37,9 @@ from glmhmmt.plots.states import (
 from glmhmmt.plots.transitions import (
     plot_transition_matrix as transition_matrix,
     plot_transition_matrix_by_subject as transition_matrix_by_subject,
+    transition_weights_by_subject,
+    transition_weights_summary_boxplot,
+    transition_weights_summary_lineplot,
 )
 
 from glmhmmt.plots.metrics import ll_boxplot 
@@ -76,4 +79,7 @@ __all__ = [
     "state_switches_summary",
     "transition_matrix",
     "transition_matrix_by_subject",
+    "transition_weights_by_subject",
+    "transition_weights_summary_boxplot",
+    "transition_weights_summary_lineplot",
 ]

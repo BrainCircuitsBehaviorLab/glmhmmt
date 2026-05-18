@@ -1,11 +1,113 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+
+from glmhmmt.plots.emissions import (
+    emission_weights_by_subject,
+    emission_weights_summary_boxplot,
+    emission_weights_summary_lineplot,
+)
+
+
+def transition_weights_by_subject(
+    weights_df,
+    *,
+    K: int | None = None,
+    state_label_order: Sequence[str] | None = None,
+    feature_order: Sequence[str] | None = None,
+    abs_features: Sequence[str] = (),
+    feature_labeler: Callable[[str], str] | None = None,
+    axes: Sequence[plt.Axes] | None = None,
+    figsize: tuple[float, float] | None = None,
+    title: str | None = None,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot subject-wise transition weights with the emission-weight style."""
+    fig, axes_grid = emission_weights_by_subject(
+        weights_df,
+        K=K,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+        axes=axes,
+        figsize=figsize,
+        title=title,
+    )
+    for ax in np.asarray(axes_grid, dtype=object).ravel():
+        if ax.get_visible():
+            ax.set_ylabel("Transition weight")
+    return fig, axes_grid
+
+
+def transition_weights_summary_lineplot(
+    weights_df,
+    *,
+    K: int | None = None,
+    state_label_order: Sequence[str] | None = None,
+    feature_order: Sequence[str] | None = None,
+    abs_features: Sequence[str] = (),
+    feature_labeler: Callable[[str], str] | None = None,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+    title: str | None = None,
+) -> plt.Axes:
+    """Plot transition-weight means with the emission summary-line style."""
+    ax = emission_weights_summary_lineplot(
+        weights_df,
+        K=K,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+        ax=ax,
+        figsize=figsize,
+        title=title,
+    )
+    ax.set_ylabel("Transition weight")
+    return ax
+
+
+def transition_weights_summary_boxplot(
+    weights_df,
+    *,
+    K: int | None = None,
+    state_label_order: Sequence[str] | None = None,
+    feature_order: Sequence[str] | None = None,
+    abs_features: Sequence[str] = (),
+    feature_labeler: Callable[[str], str] | None = None,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+    title: str | None = None,
+    connect_subjects: bool = True,
+    show_ttests: bool = False,
+    subject_line_color: str = "#7A7A7A",
+    subject_line_alpha: float = 0.15,
+    subject_line_width: float = 1.0,
+) -> plt.Axes:
+    """Plot transition-weight distributions with the emission boxplot style."""
+    ax = emission_weights_summary_boxplot(
+        weights_df,
+        K=K,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+        ax=ax,
+        figsize=figsize,
+        title=title,
+        connect_subjects=connect_subjects,
+        show_ttests=show_ttests,
+        subject_line_color=subject_line_color,
+        subject_line_alpha=subject_line_alpha,
+        subject_line_width=subject_line_width,
+    )
+    ax.set_ylabel("Transition weight")
+    return ax
 
 
 def plot_transition_matrix(

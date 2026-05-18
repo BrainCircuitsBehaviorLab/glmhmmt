@@ -7,6 +7,7 @@ import numpy as np
 import polars as pl
 
 from glmhmmt.cli.fit_common import (
+    align_design_matrix_to_columns,
     apply_valid_trial_mask,
     build_session_kfold_split,
     fit_best_restart,
@@ -66,6 +67,8 @@ def _prepare_arrays(
     transition_cols,
     session_col: str,
     *,
+    expected_x_cols: list[str] | None = None,
+    expected_u_cols: list[str] | None = None,
     min_session_length: int = 2,
 ):
     y, X, U, names = adapter.build_design_matrices(
@@ -81,6 +84,12 @@ def _prepare_arrays(
         U,
         min_length=min_session_length,
     )
+    if expected_x_cols is not None:
+        X, x_cols = align_design_matrix_to_columns(X, list(names.get("X_cols", [])), expected_x_cols)
+        names = {**names, "X_cols": x_cols}
+    if expected_u_cols is not None:
+        U, u_cols = align_design_matrix_to_columns(U, list(names.get("U_cols", [])), expected_u_cols)
+        names = {**names, "U_cols": u_cols}
     return jnp.asarray(y), jnp.asarray(X), jnp.asarray(U), np.asarray(session_ids), names
 
 
@@ -262,6 +271,8 @@ def fit_subject_cv(
             emission_cols,
             transition_cols,
             adapter.session_col,
+            expected_x_cols=list(names.get("X_cols", [])),
+            expected_u_cols=list(names.get("U_cols", [])),
         )
         inputs_train = jnp.concatenate([X_train, U_train], axis=1)
         inputs_test = jnp.concatenate([X_test, U_test], axis=1)

@@ -368,6 +368,35 @@ def raw_loglik_multisession(model, params, emissions, inputs, session_ids) -> fl
     return float(jnp.sum(ll_batch))
 
 
+def align_design_matrix_to_columns(
+    values,
+    value_cols: list[str],
+    reference_cols: list[str],
+):
+    """Return ``values`` with columns ordered/padded to ``reference_cols``.
+
+    Subject- or split-local one-hot regressors can be absent from a CV split.
+    Those missing indicator columns are true zeros for that split, while extra
+    columns not present during training cannot be scored by the fitted model.
+    """
+    value_cols = [str(col) for col in value_cols]
+    reference_cols = [str(col) for col in reference_cols]
+    if value_cols == reference_cols:
+        return values, reference_cols
+
+    arr = np.asarray(values)
+    if arr.ndim != 2:
+        raise ValueError(f"Design matrix must be 2D; got shape {arr.shape}.")
+    dtype = arr.dtype if arr.size else np.float32
+    aligned = np.zeros((arr.shape[0], len(reference_cols)), dtype=dtype)
+    col_to_idx = {col: idx for idx, col in enumerate(value_cols)}
+    for dst_idx, col in enumerate(reference_cols):
+        src_idx = col_to_idx.get(col)
+        if src_idx is not None:
+            aligned[:, dst_idx] = arr[:, src_idx]
+    return aligned, reference_cols
+
+
 def score_split(model, params, emissions, inputs, session_ids) -> dict[str, Any]:
     """Evaluate one fitted model on a train or test split."""
     T = int(np.asarray(emissions).shape[0])

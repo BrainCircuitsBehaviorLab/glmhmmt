@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 
 from glmhmmt.cli.fit_common import (
+    align_design_matrix_to_columns,
     apply_valid_trial_mask,
     build_session_kfold_split,
     fit_best_restart,
@@ -109,11 +110,15 @@ def _prepare_arrays(
     emission_cols,
     session_col: str,
     *,
+    expected_x_cols: list[str] | None = None,
     min_session_length: int = 2,
 ):
     y, X, _, names = adapter.build_design_matrices(feature_df, emission_cols=emission_cols)
     session_ids = feature_df[session_col].to_numpy()
     y, X, session_ids = apply_valid_trial_mask(session_ids, y, X, min_length=min_session_length)
+    if expected_x_cols is not None:
+        X, x_cols = align_design_matrix_to_columns(X, list(names.get("X_cols", [])), expected_x_cols)
+        names = {**names, "X_cols": x_cols}
     return jnp.asarray(y), jnp.asarray(X), np.asarray(session_ids), names
 
 
@@ -260,6 +265,7 @@ def fit_subject_cv(
             test_df,
             emission_cols,
             adapter.session_col,
+            expected_x_cols=list(names.get("X_cols", [])),
         )
 
         model = _build_model(

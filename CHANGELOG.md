@@ -1,7 +1,10 @@
 # Changelog
 
 ## 0.2.11
-- Fixed GLM-HMM and GLM-HMM-T fits to reuse resolved emission columns, preventing CV train/test shape mismatches with dynamic one-hot regressors.
+- Updated transition coefficients boxplots to follow the same styling as emissions.
+
+## 0.2.11
+- Fixed GLM-HMM and GLM-HMM-T CV fits to reuse resolved emission columns and zero-fill split-local one-hot regressors, preventing train/test shape mismatches with dynamic bias-hot columns.
 
 ## 0.2.10
 - Updated the frozen emissions selector to hide the one hot families.

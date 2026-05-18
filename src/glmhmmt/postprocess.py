@@ -377,6 +377,70 @@ def build_emission_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
     return pl.DataFrame(records)
 
 
+def _transition_feature_names(feature_names, D: int) -> list[str]:
+    names = [str(name) for name in list(feature_names or [])]
+    if len(names) >= D:
+        return names[:D]
+    return names + [f"u{idx}" for idx in range(len(names), D)]
+
+
+def _standardize_transition_weights(weights: np.ndarray) -> np.ndarray:
+    """Convert GLM-HMM-T transition weights to one row per target state.
+
+    The fitted tensor stores one set of transition-regressor coefficients for
+    each source-target state pair. For summary plots we follow the historical
+    notebook convention: average over source states and center the target-state
+    coefficients against an implicit zero baseline.
+    """
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim != 3:
+        raise ValueError(f"transition_weights must be 3D, got ndim={weights.ndim}.")
+    weights_avg = weights.mean(axis=0)
+    baseline = -np.mean(
+        np.vstack([weights_avg, np.zeros((1, weights_avg.shape[1]), dtype=float)]),
+        axis=0,
+    )
+    return weights_avg + baseline
+
+
+def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
+    """Long-format Polars DataFrame of standardized transition weights.
+
+    Columns
+    -------
+    subject, state_idx, state_label, state_rank, feature, feature_idx, weight
+    """
+    records: list[dict] = []
+    for subj, view in views.items():
+        transition_weights = getattr(view, "transition_weights", None)
+        if transition_weights is None:
+            continue
+
+        weights_std = _standardize_transition_weights(transition_weights)
+        feature_names = _transition_feature_names(
+            getattr(view, "U_cols", []),
+            int(weights_std.shape[1]),
+        )
+        for k in range(min(int(view.K), int(weights_std.shape[0]))):
+            lbl = view.state_name_by_idx.get(k, f"State {k}")
+            rank = view.state_rank_by_idx.get(k, k)
+            for fi, fname in enumerate(feature_names):
+                records.append(
+                    {
+                        "subject": subj,
+                        "state_idx": k,
+                        "state_label": lbl,
+                        "state_rank": rank,
+                        "feature": fname,
+                        "feature_idx": int(fi),
+                        "weight": float(weights_std[k, fi]),
+                    }
+                )
+    if not records:
+        return pl.DataFrame()
+    return pl.DataFrame(records)
+
+
 def _default_state_labels(K: int, C: int = 2) -> list[str]:
     if K == 1:
         return ["State 0"]
