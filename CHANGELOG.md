@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.14
+- Added empirical cumulative state dwell-time plots and per-subject median dwell-time custom boxplots.
+- Extended dwell-time model predictions to use averaged transition matrices for time-varying and covariate-driven transitions when available.
+
 ## 0.2.13
 - Added `tick_rotation` support to emission- and transition-weight plot helpers.
 

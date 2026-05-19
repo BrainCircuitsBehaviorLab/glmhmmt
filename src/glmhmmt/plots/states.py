@@ -590,6 +590,123 @@ def state_dwell_times_by_subject(
 
     return fig, axes_array
 
+
+def state_dwell_times_cumulative(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    dwell_df = to_pandas_df(payload.get("dwell_df"), name="dwell_df")
+    require_columns(dwell_df, ["state_label", "dwell"], name="dwell_df")
+    if dwell_df.empty:
+        raise ValueError("dwell_df is empty.")
+
+    states = list(payload.get("state_order") or resolve_state_order(dwell_df))
+    palette = state_palette(states)
+    max_dwell = int(payload.get("max_dwell", max(1.0, dwell_df["dwell"].max())))
+
+    fig, ax, created_fig = resolve_single_axis(ax=ax, figsize=figsize or (5.2, 3.6))
+    x = np.arange(1, max_dwell + 1, dtype=float)
+
+    for state in states:
+        sub = dwell_df[dwell_df["state_label"].astype(str) == str(state)]
+        values = pd.to_numeric(sub["dwell"], errors="coerce").dropna().to_numpy(dtype=float)
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            continue
+        cdf = np.asarray([np.mean(values <= cutoff) for cutoff in x], dtype=float)
+        ax.step(
+            np.r_[0.0, x],
+            np.r_[0.0, cdf],
+            where="post",
+            color=palette[state],
+            lw=2.4,
+            label=str(state),
+        )
+
+    ax.set_xlim(0, max_dwell)
+    ax.set_ylim(0.0, 1.02)
+    ax.set_xlabel("state dwell time\n# trials")
+    ax.set_ylabel("cumulative probability")
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax.legend(frameon=False, loc="lower right")
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, ax
+
+
+def state_dwell_median_boxplot(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    dwell_df = to_pandas_df(payload.get("dwell_df"), name="dwell_df")
+    require_columns(dwell_df, ["subject", "state_label", "dwell"], name="dwell_df")
+    if dwell_df.empty:
+        raise ValueError("dwell_df is empty.")
+
+    states = list(payload.get("state_order") or resolve_state_order(dwell_df))
+    palette = state_palette(states)
+    median_df = (
+        dwell_df.assign(dwell=pd.to_numeric(dwell_df["dwell"], errors="coerce"))
+        .dropna(subset=["dwell"])
+        .groupby(["subject", "state_label"], observed=True)
+        .agg(median_dwell=("dwell", "median"))
+        .reset_index()
+    )
+    if median_df.empty:
+        raise ValueError("median dwell dataframe is empty.")
+
+    grouped_vals = _grouped_values(median_df, label_col="state_label", value_col="median_dwell", labels=states)
+    colors = [palette[state] for state in states]
+    positions = np.arange(len(states), dtype=float)
+    line_values = (
+        median_df.pivot(index="subject", columns="state_label", values="median_dwell")
+        .reindex(columns=states)
+        .to_numpy(dtype=float)
+    )
+
+    fig, ax, created_fig = resolve_single_axis(ax=ax, figsize=figsize or (4.8, 3.5))
+    custom_boxplot(
+        ax,
+        grouped_vals,
+        positions=positions,
+        widths=0.5,
+        median_colors=colors,
+        line_values=line_values,
+        showfliers=False,
+        zorder=2,
+    )
+    for pos, vals, color in zip(positions, grouped_vals, colors, strict=False):
+        vals = np.asarray(vals, dtype=float)
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            continue
+        jitter = np.linspace(-0.08, 0.08, vals.size) if vals.size > 1 else np.array([0.0])
+        ax.scatter(
+            np.full(vals.size, pos, dtype=float) + jitter,
+            vals,
+            s=22,
+            color=color,
+            alpha=0.7,
+            edgecolors="white",
+            linewidths=0.4,
+            zorder=3,
+        )
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(states)
+    ax.set_ylabel("median dwell time\n# trials")
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+
+    if created_fig:
+        fig.tight_layout()
+    return fig, ax
+
+
 def state_dwell_times_summary(
     payload: dict,
     *,
