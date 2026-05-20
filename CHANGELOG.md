@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1
+- Changed input driven transitions to an identifiable Softmax in order to match ssm alternative input driven transitions.
+
 ## 0.2.14
 - Added empirical cumulative state dwell-time plots and per-subject median dwell-time custom boxplots.
 - Extended dwell-time model predictions to use averaged transition matrices for time-varying and covariate-driven transitions when available.

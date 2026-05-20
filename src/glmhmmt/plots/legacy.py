@@ -2671,7 +2671,11 @@ def _transition_feature_names(feature_names, D: int) -> list[str]:
 
 
 def _standardize_transition_weights(weights: np.ndarray) -> np.ndarray:
-    weights_avg = np.asarray(weights, dtype=float).mean(axis=0)
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim == 2:
+        weights_full = np.vstack([weights, np.zeros((1, weights.shape[1]), dtype=float)])
+        return weights_full - weights_full.mean(axis=0, keepdims=True)
+    weights_avg = weights.mean(axis=0)
     baseline = -np.mean(
         np.vstack([weights_avg, np.zeros((1, weights_avg.shape[1]), dtype=float)]),
         axis=0,
@@ -2723,7 +2727,12 @@ def _resolve_transition_weight_inputs(
         if not selected:
             raise ValueError("No transition weights found for selected subjects.")
         if K is None:
-            K = int(np.asarray(arrays_store[selected[0]]["transition_weights"]).shape[0])
+            transition_weights = np.asarray(arrays_store[selected[0]]["transition_weights"])
+            K = (
+                int(transition_weights.shape[0] + 1)
+                if transition_weights.ndim == 2
+                else int(transition_weights.shape[0])
+            )
         names = names or {}
         state_labels = state_labels or {}
         label_map = {

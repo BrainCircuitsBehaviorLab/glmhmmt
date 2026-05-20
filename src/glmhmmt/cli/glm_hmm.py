@@ -165,7 +165,7 @@ print("Saved:", adapter.dataset_path().parent / "predictions.parquet")
 # --- Transition weights ---
 import pandas as pd
 bias_np = np.asarray(fitted_params4.transitions.bias)    # (K, K)
-W_tr    = np.asarray(fitted_params4.transitions.weights)  # (K, K, D)
+W_tr    = np.asarray(fitted_params4.transitions.weights)  # (K-1, D)
 
 state_labels = [f"s{k+1}" for k in range(bias_np.shape[0])]
 

@@ -202,12 +202,15 @@ class SubjectFitView:
     transition_bias :
         Input-driven transition bias shape ``(K, K)`` — GLM-HMM-t only.
     transition_weights :
-        Input-driven transition weight tensor, shape ``(K, K, D)`` —
-        GLM-HMM-t only.
+        Input-driven transition weights, shape ``(K - 1, D)`` for new
+        SSM-style alternative-formulation fits, or legacy ``(K, K, D)``.
     U :
         Transition design matrix, shape ``(T, D)`` — GLM-HMM-t only.
     U_cols :
         Transition feature names, length ``D``.
+    transition_weight_baseline_idx :
+        Target state whose transition-input coefficient vector is implicit zero
+        in alternative-formulation GLM-HMM-T fits.
     baseline_class_idx :
         Choice class used as the implicit softmax reference. The stored
         ``emission_weights`` rows are aligned to class-index order with this
@@ -234,9 +237,10 @@ class SubjectFitView:
     initial_probs: Optional[np.ndarray] = None  # (K,)
     transition_matrix: Optional[np.ndarray] = None  # (K, K) or (T-1, K, K)
     transition_bias: Optional[np.ndarray] = None  # (K, K)
-    transition_weights: Optional[np.ndarray] = None  # (K, K, D)
+    transition_weights: Optional[np.ndarray] = None  # (K - 1, D) or legacy (K, K, D)
     U: Optional[np.ndarray] = None  # (T, D)
     U_cols: list[str] = field(default_factory=list)
+    transition_weight_baseline_idx: Optional[int] = None
     baseline_class_idx: int = 0
     emission_model: str = "standard"
     X_private: Optional[np.ndarray] = None  # (T, C, F_private)
@@ -396,7 +400,8 @@ def build_views(
         transition_weights = np.asarray(d["transition_weights"]) if "transition_weights" in d else None
         u_cols = list(d.get("U_cols", []))
         if transition_weights is not None:
-            u_cols = u_cols[: transition_weights.shape[2]]
+            transition_width = transition_weights.shape[-1] if transition_weights.ndim in (2, 3) else 0
+            u_cols = u_cols[:transition_width]
 
         views[subj] = SubjectFitView(
             subject=subj,
@@ -420,6 +425,11 @@ def build_views(
             transition_weights=transition_weights,
             U=np.asarray(d["U"]) if "U" in d else None,
             U_cols=u_cols,
+            transition_weight_baseline_idx=(
+                int(np.asarray(d["transition_weight_baseline_idx"]).reshape(()))
+                if "transition_weight_baseline_idx" in d
+                else (K - 1 if transition_weights is not None and transition_weights.ndim == 2 else None)
+            ),
             baseline_class_idx=baseline_class_idx,
             emission_model=emission_model,
             X_private=X_private,

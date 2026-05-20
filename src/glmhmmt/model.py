@@ -416,7 +416,7 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
 
 class ParamsInputDrivenTransitions(NamedTuple):
     bias: Union[Float[Array, "num_states num_states"], ParameterProperties]
-    weights: Union[Float[Array, "num_states num_states input_dim"], ParameterProperties]
+    weights: Union[Float[Array, "num_states_minus1 input_dim"], ParameterProperties]
 
 
 class InputDrivenSoftmaxTransitions(HMMTransitions):
@@ -436,6 +436,48 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         self.transition_input_dim = transition_input_dim
         self.weight_scale = weight_scale
         self.stickiness = stickiness
+        self.baseline_target_idx = num_states - 1
+
+    def _normalize_bias(self, bias):
+        """Store baseline transition logits in row-normalized gauge."""
+        return jax.nn.log_softmax(bias, axis=-1)
+
+    def _weights_with_baseline(self, weights):
+        """Append the implicit zero input-weight vector for the baseline target."""
+        zero = jnp.zeros((1, weights.shape[-1]), dtype=weights.dtype)
+        return jnp.concatenate(
+            [
+                weights[: self.baseline_target_idx],
+                zero,
+                weights[self.baseline_target_idx :],
+            ],
+            axis=0,
+        )
+
+    def _coerce_weights(self, weights, dtype=jnp.float32):
+        """Accept new K-1 weights and common full-weight warm-start formats."""
+        W = jnp.asarray(weights, dtype)
+        K = self.num_states
+        if W.ndim == 2:
+            if W.shape[0] == K - 1:
+                return W
+            if W.shape[0] == K:
+                baseline = W[self.baseline_target_idx : self.baseline_target_idx + 1]
+                contrasts = W - baseline
+                return jnp.concatenate(
+                    [
+                        contrasts[: self.baseline_target_idx],
+                        contrasts[self.baseline_target_idx + 1 :],
+                    ],
+                    axis=0,
+                )
+        if W.ndim == 3 and W.shape[1] == K:
+            # Backward-compatible conversion from the old source-target tensor.
+            return self._coerce_weights(W.mean(axis=0), dtype=dtype)
+        raise ValueError(
+            "transition weights must have shape (K-1, D), (K, D), or legacy "
+            f"(K, K, D); got {tuple(W.shape)} for K={K}."
+        )
 
     def initialize(self, key: Optional[Array] = None, method: str = "prior", bias=None, weights=None):
         if key is None:
@@ -449,10 +491,11 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             b = b + self.stickiness * jnp.eye(K, dtype=jnp.float32)
         else:
             b = jnp.asarray(bias, jnp.float32)
+        b = self._normalize_bias(b)
         W = (
-            self.weight_scale * jr.normal(key2, (K, K, D), dtype=jnp.float32)
+            self.weight_scale * jr.normal(key2, (K - 1, D), dtype=jnp.float32)
             if weights is None
-            else jnp.asarray(weights, jnp.float32)
+            else self._coerce_weights(weights, jnp.float32)
         )
 
         params = ParamsInputDrivenTransitions(bias=b, weights=W)
@@ -467,27 +510,30 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
     def distribution(self, params, state, inputs=None):
         u = inputs[self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]
         i = jnp.asarray(state, jnp.int32)
-        logits = params.bias[i] + jnp.einsum("kd,d->k", params.weights[i], u)
+        input_logits = self._weights_with_baseline(params.weights) @ u
+        logits = params.bias[i] + input_logits
         return tfd.Categorical(logits=logits)
 
     def _compute_transition_matrices(self, params, inputs):
         """
-        Return A[t,i,j] = P(z_{t+1}=j | z_t=i, inputs_t) for t=0..T-2
+        Return A[t,i,j] = P(z_{t+1}=j | z_t=i, inputs_{t+1}) for t=0..T-2.
+        This follows Dynamax's convention that transition inputs are aligned to
+        the destination/current trial row.
         Shape: (T-1, K, K)
         """
 
-        # u_t used for transition t -> t+1, so only t=0..T-2
-        u = inputs[:-1, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (T-1, D)
-        # logits[t, i, j] = bias[i,j] + sum_d W[i,j,d] * u[t,d]
-        logits = params.bias[None, :, :] + jnp.einsum("ijd,td->tij", params.weights, u)  # (T-1,K,K)
+        # u_{t+1} is used for transition t -> t+1, matching Dynamax.
+        u = inputs[1:, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (T-1, D)
+        input_logits = u @ self._weights_with_baseline(params.weights).T  # (T-1,K)
+        logits = params.bias[None, :, :] + input_logits[:, None, :]  # (T-1,K,K)
         return jax.nn.softmax(logits, axis=-1)
 
     def collect_suff_stats(self, params, posterior, inputs=None):
-        # posterior.trans_probs: (T-1, K, K) o con batch fuera
+        # posterior.trans_probs: (T-1, K, K), or with a batch axis outside
         # inputs: (T, Dall)
-        # usamos inputs_t para transición t->t+1: t=0..T-2
+        # use inputs_{t+1} for transition t -> t+1, following Dynamax
         xi = posterior.trans_probs
-        u_inputs = inputs[:-1]  # (T-1, Dall)
+        u_inputs = inputs[1:]  # (T-1, Dall)
         return (xi, u_inputs)
 
     def m_step(self, params, props, batch_stats, m_step_state):
@@ -507,8 +553,9 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         clip_val = 20.0
 
         def loss_fn(b, W):
-            # logits[n,i,j] = b[i,j] + sum_d W[i,j,d] u[n,d]
-            logits = b[None, :, :] + jnp.einsum("ijd,nd->nij", W, u)  # (N,K,K)
+            # logits[n,i,j] = b[i,j] + sum_d W_with_baseline[j,d] u[n,d]
+            input_logits = u @ self._weights_with_baseline(W).T  # (N,K)
+            logits = b[None, :, :] + input_logits[:, None, :]  # (N,K,K)
             logp = jax.nn.log_softmax(logits, axis=-1)  # (N,K,K)
             nll = -(xi * logp).sum()
             reg = l2 * (jnp.sum(b * b) + jnp.sum(W * W))
@@ -522,7 +569,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             loss, grads = jax.value_and_grad(loss_fn, argnums=(0, 1))(b, W)
             updates, opt_state = opt.update(grads, opt_state, (b, W))
             b, W = optax.apply_updates((b, W), updates)
-            b = jnp.clip(b, -clip_val, clip_val)
+            b = self._normalize_bias(jnp.clip(b, -clip_val, clip_val))
             W = jnp.clip(W, -clip_val, clip_val)
             return (b, W, opt_state), loss
 
@@ -547,10 +594,16 @@ class SoftmaxGLMHMM(HMM):
         num_states: Number of hidden states `K`.
         num_classes: Number of choice categories `C` (e.g. 3 for L / C / R).
         emission_input_dim: Number of columns in the emission design matrix `X`.
-        transition_input_dim: Number of columns in the transition design matrix `U`.  Pass `0` for standard (non-input-driven) transitions.
+        transition_input_dim: Number of columns in the transition design matrix
+            `U`. Pass `0` for standard transitions. For input-driven
+            transitions, `U[t]` is aligned to the destination/current trial and
+            parameterizes `P(z[t] | z[t-1], U[t])`.
         initial_probs_concentration: Dirichlet concentration for the initial state distribution.  Default `1.1`.
         transition_matrix_concentration: Dirichlet concentration for transition matrix rows.  Only used when `transition_input_dim == 0`. Default `1.1`.
-        transition_matrix_stickiness: Extra weight on the diagonal of the Dirichlet prior to encourage self-transitions.  Only used when `transition_input_dim == 0`.  Default `0.0`.
+        transition_matrix_stickiness: Extra weight on the diagonal of the
+            Dirichlet prior to encourage self-transitions for standard
+            transitions, and the initial diagonal logit offset for input-driven
+            transitions. Default `0.0`.
         weight_scale: Standard deviation of the random normal weight initialisation for emission and transition weights.  Default `1.0`.
         frozen_emissions: Per-state emission feature freeze specification of the form `{state_idx: {feature_name: fixed_value}}`.  Feature names must appear in `emission_feature_names`; frozen entries are enforced by a bijector so they receive no gradient updates. Example: `{0: {"SL": 0.0, "SC": 0.0, "SR": 0.0}}`.
         emission_feature_names: Ordered names of the `X` columns — pass `names["X_cols"]` from the adapter design-matrix build. **Required** when `frozen_emissions` is set.

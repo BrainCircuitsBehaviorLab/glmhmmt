@@ -387,15 +387,20 @@ def _transition_feature_names(feature_names, D: int) -> list[str]:
 def _standardize_transition_weights(weights: np.ndarray) -> np.ndarray:
     """Convert GLM-HMM-T transition weights to one row per target state.
 
-    The fitted tensor stores one set of transition-regressor coefficients for
-    each source-target state pair. For summary plots we follow the historical
-    notebook convention: average over source states and center the target-state
-    coefficients against an implicit zero baseline.
+    New fits store the SSM-style alternative formulation: ``K-1`` target-state
+    coefficient vectors plus an implicit zero vector for the reference target.
+    Legacy fits stored one coefficient vector per source-target state pair; for
+    those arrays we average over source states first. In both cases, plots show
+    all target states centered against the implicit zero baseline.
     """
     weights = np.asarray(weights, dtype=float)
-    if weights.ndim != 3:
-        raise ValueError(f"transition_weights must be 3D, got ndim={weights.ndim}.")
-    weights_avg = weights.mean(axis=0)
+    if weights.ndim == 2:
+        weights_full = np.vstack([weights, np.zeros((1, weights.shape[1]), dtype=float)])
+        return weights_full - weights_full.mean(axis=0, keepdims=True)
+    elif weights.ndim == 3:
+        weights_avg = weights.mean(axis=0)
+    else:
+        raise ValueError(f"transition_weights must be 2D or 3D, got ndim={weights.ndim}.")
     baseline = -np.mean(
         np.vstack([weights_avg, np.zeros((1, weights_avg.shape[1]), dtype=float)]),
         axis=0,

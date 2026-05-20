@@ -203,6 +203,9 @@ def fit_subject(
         "U": np.asarray(U),
         "frozen_emissions": serialize_frozen_emissions(frozen),
         "baseline_class_idx": int(baseline_class_idx),
+        "transition_weight_baseline_idx": (
+            int(model.transition_component.baseline_target_idx) if U.shape[1] > 0 else -1
+        ),
         "cv_mode": "none",
         "cv_repeats": 0,
     }
@@ -407,6 +410,11 @@ def fit_subject_cv(
         "U": np.asarray(U_full),
         "frozen_emissions": serialize_frozen_emissions(frozen),
         "baseline_class_idx": int(baseline_class_idx),
+        "transition_weight_baseline_idx": (
+            int(best_repeat_model.transition_component.baseline_target_idx)
+            if U_full.shape[1] > 0
+            else -1
+        ),
         "cv_mode": "balanced_session_holdout",
         "cv_repeats": n_folds,
     }
@@ -460,6 +468,7 @@ def save_results(result: dict, out_dir: Path) -> None:
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
         baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
+        transition_weight_baseline_idx=np.array(int(result.get("transition_weight_baseline_idx", -1))),
     )
 
 
@@ -525,6 +534,7 @@ def save_cv_results(result: dict, out_dir: Path) -> None:
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
         baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
+        transition_weight_baseline_idx=np.array(int(result.get("transition_weight_baseline_idx", -1))),
         cv_selected_repeat=np.array(int(result["best_repeat_index"])),
         cv_selected_metric=np.array(float(result["best_repeat_test_ll_per_trial"])),
     )

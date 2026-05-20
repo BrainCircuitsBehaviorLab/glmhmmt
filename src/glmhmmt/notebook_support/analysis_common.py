@@ -485,7 +485,8 @@ def load_fit_arrays(
 
         transition_width = 0
         if "transition_weights" in arrays:
-            transition_width = int(np.asarray(arrays["transition_weights"]).shape[2])
+            transition_weights = np.asarray(arrays["transition_weights"])
+            transition_width = int(transition_weights.shape[-1]) if transition_weights.ndim in (2, 3) else 0
         elif "U" in arrays:
             transition_width = int(np.asarray(arrays["U"]).shape[1])
         arrays["U_cols"] = _first_matching_u_width(

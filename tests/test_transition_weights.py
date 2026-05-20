@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import jax.numpy as jnp
 import matplotlib
 import numpy as np
 
 matplotlib.use("Agg")
 
+from glmhmmt.model import InputDrivenSoftmaxTransitions, ParamsInputDrivenTransitions
 from glmhmmt.plots.transitions import (
     transition_weights_by_subject,
     transition_weights_summary_boxplot,
@@ -57,6 +61,57 @@ def test_build_transition_weights_df_matches_legacy_standardization():
         [row["weight"] for row in rows],
         [1.0 / 3.0, 2.0 / 3.0, 7.0 / 3.0, 8.0 / 3.0],
     )
+
+
+def test_build_transition_weights_df_expands_alternative_formulation_weights():
+    view = _view("s1")
+    view.transition_weights = np.asarray([[2.0, 4.0]], dtype=float)
+
+    rows = build_transition_weights_df({"s1": view}).sort(["state_idx", "feature_idx"]).to_dicts()
+
+    assert [row["feature"] for row in rows] == ["A_plus", "A_minus", "A_plus", "A_minus"]
+    assert np.allclose([row["weight"] for row in rows], [1.0, 2.0, -1.0, -2.0])
+
+
+def test_input_driven_transitions_use_destination_inputs_and_k_minus_one_weights():
+    transitions = InputDrivenSoftmaxTransitions(
+        num_states=2,
+        emission_input_dim=1,
+        transition_input_dim=1,
+        stickiness=0.0,
+    )
+    params = ParamsInputDrivenTransitions(
+        bias=jnp.zeros((2, 2), dtype=jnp.float32),
+        weights=jnp.asarray([[2.0]], dtype=jnp.float32),
+    )
+    inputs = jnp.asarray(
+        [
+            [1.0, -3.0],
+            [1.0, 0.5],
+            [1.0, -1.0],
+        ],
+        dtype=jnp.float32,
+    )
+
+    matrices = np.asarray(transitions._compute_transition_matrices(params, inputs))
+    _, suff_inputs = transitions.collect_suff_stats(
+        params,
+        SimpleNamespace(trans_probs=jnp.ones((2, 2, 2), dtype=jnp.float32)),
+        inputs,
+    )
+
+    np.testing.assert_allclose(np.asarray(suff_inputs), np.asarray(inputs[1:]))
+    np.testing.assert_allclose(
+        matrices[:, 0, :],
+        np.asarray(
+            [
+                [np.exp(1.0) / (np.exp(1.0) + 1.0), 1.0 / (np.exp(1.0) + 1.0)],
+                [np.exp(-2.0) / (np.exp(-2.0) + 1.0), 1.0 / (np.exp(-2.0) + 1.0)],
+            ]
+        ),
+        rtol=1e-6,
+    )
+    assert params.weights.shape == (1, 1)
 
 
 def test_transition_weight_plots_use_emission_style_dataframe():
