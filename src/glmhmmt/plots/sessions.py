@@ -301,3 +301,80 @@ def session_deepdive(payload: dict) -> plt.Figure:
     fig.tight_layout()
     fig.subplots_adjust(right=0.82)
     return fig
+
+
+def session_deepdive_state_traces(payload: dict) -> plt.Figure:
+    """Plot one session's state posterior traces as lines only."""
+    trial_df = to_pandas_df(payload.get("trial_df"), name="trial_df")
+    posterior_df = to_pandas_df(payload.get("posterior_df"), name="posterior_df")
+    require_columns(trial_df, ["trial_in_session"], name="trial_df")
+    require_columns(posterior_df, ["trial_in_session", "state_label", "probability"], name="posterior_df")
+    if trial_df.empty or posterior_df.empty:
+        raise ValueError("session state-trace payload is empty.")
+
+    states = list(payload.get("state_order") or resolve_state_order(posterior_df))
+    palette = state_palette(states)
+    x = trial_df["trial_in_session"].to_numpy(dtype=float)
+    posterior_wide = (
+        posterior_df.pivot_table(
+            index="trial_in_session",
+            columns="state_label",
+            values="probability",
+            aggfunc="mean",
+        )
+        .reindex(index=x, columns=states)
+    )
+
+    fig, ax = plt.subplots(1, 1, figsize=payload.get("trace_figsize", (14, 3.8)))
+
+    for state in states:
+        ax.plot(
+            x,
+            posterior_wide[state].to_numpy(dtype=float),
+            color=palette[state],
+            lw=1.9,
+            alpha=0.95,
+            label=state,
+        )
+
+    change_trials = np.asarray(payload.get("change_trials", []), dtype=int)
+    if change_trials.size:
+        valid_change_trials = change_trials[(change_trials >= 0) & (change_trials < len(x))]
+        for trial in valid_change_trials:
+            ax.axvline(x[int(trial)], color="#111111", lw=0.6, alpha=0.16, zorder=0)
+
+    if "response" in trial_df.columns:
+        response = pd.to_numeric(trial_df["response"], errors="coerce").to_numpy(dtype=float)
+        choice_colors = payload.get("choice_colors")
+        choice_labels = payload.get("choice_labels")
+        if choice_colors is None or choice_labels is None:
+            num_classes = int(payload.get("num_classes", max(2, int(np.nanmax(response)) + 1 if np.isfinite(response).any() else 2)))
+            if num_classes == 2:
+                choice_colors = {0: "royalblue", 1: "tomato"}
+                choice_labels = {0: "L", 1: "R"}
+            else:
+                choice_colors = {0: "royalblue", 1: "gold", 2: "tomato"}
+                choice_labels = {0: "L", 1: "C", 2: "R"}
+        for resp, color in choice_colors.items():
+            mask = response == float(resp)
+            if mask.sum() == 0:
+                continue
+            ax.scatter(
+                x[mask],
+                np.ones(int(mask.sum())) * 1.03,
+                c=color,
+                s=5,
+                marker="|",
+                label=choice_labels.get(resp, str(resp)),
+                transform=ax.get_xaxis_transform(),
+                clip_on=False,
+            )
+
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Trial within session")
+    ax.set_ylabel("State probability")
+    ax.set_title(f"{payload.get('title', 'Session deepdive')} - posterior traces", pad=22)
+    ax.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.82)
+    return fig

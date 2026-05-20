@@ -14,6 +14,7 @@ from glmhmmt.plots.emissions import (
 from glmhmmt.plots.sessions import (
     posterior_probs,
     session_deepdive,
+    session_deepdive_state_traces,
     session_trajectories,
 )
 from glmhmmt.plots.states import (
@@ -63,6 +64,7 @@ __all__ = [
     "emission_weights_summary_lineplot",
     "posterior_probs",
     "session_deepdive",
+    "session_deepdive_state_traces",
     "session_trajectories",
     "state_accuracy",
     "state_dwell_median_boxplot",

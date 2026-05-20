@@ -169,6 +169,12 @@ states_hex_k3 = [
     # "#E7298A",   # Left disengaged / left bias
     # "#7570B3",   # Right disengaged / right bias
 ]
+states_hex_k4 = [
+    "#1B9E77",   # Engaged L
+    "#7f7f7f",   # Engaged R
+    "#D95F02",   # Disengaged L
+    "#1F77B4",   # Disengaged R
+]
 # Colours indexed by canonical rank: 0=Engaged, 1=Disengaged, 2=Disengaged 1, …
 # All state-plots fall back to this rank-indexed list when no exact-K override
 # is defined above.

@@ -48,15 +48,31 @@ _STATE_HEX: list[str] = _cfg.get("palettes", {}).get(
 _STATE_HEX_BY_K: dict[int, list[str]] = {
     2: list(_cfg.get("palettes", {}).get("states_hex_k2", [])),
     3: list(_cfg.get("palettes", {}).get("states_hex_k3", [])),
+    4: list(
+        _cfg.get(
+            "palettes",
+            {},
+        ).get(
+            "states_hex_k4",
+            [
+                "#1B9E77",
+                "#7f7f7f",
+                "#D95F02",
+                "#1F77B4",
+            ],
+        )
+    ),
 }
 
 _LABEL_RANK: dict[str, int] = {
     "Engaged": 0,
     "Disengaged": 1,
+    "Engaged L": 0,
+    "Engaged R": 1,
     "Biased L": 1,
     "Biased R": 2,
-    "Disengaged L": 1,
-    "Disengaged R": 2,
+    "Disengaged L": 2,
+    "Disengaged R": 3,
     "Disengaged C": 3,
     **{f"Disengaged {i}": i for i in range(1, 10)},
 }
