@@ -1311,6 +1311,7 @@ def build_session_trajectories_payload(
     if not pcols:
         raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
     work = df.sort_values(["subject", session_col, sort_col]).copy()
     work["trial_in_session"] = work.groupby(["subject", session_col], observed=True).cumcount()
     long = work.melt(
@@ -1320,8 +1321,12 @@ def build_session_trajectories_payload(
         value_name="probability",
     )
     long["state_idx"] = long["state_col"].str.rsplit("_", n=1).str[-1].astype(int)
-    long["state_label"] = long["state_idx"].map(label_by_idx).fillna(long["state_col"])
-    long["state_rank"] = long["state_idx"].map(rank_by_idx).fillna(long["state_idx"]).astype(int)
+    label_rank = [
+        _state_label_rank_for_subject(subject_meta, row.subject, int(row.state_idx), label_by_idx, rank_by_idx)
+        for row in long[["subject", "state_idx"]].itertuples(index=False)
+    ]
+    long["state_label"] = [item[0] for item in label_rank]
+    long["state_rank"] = [item[1] for item in label_rank]
     long = long.rename(columns={session_col: "session"})
     trajectory_df = (
         long.groupby(["subject", "session", "trial_in_session", "state_idx", "state_label", "state_rank"], observed=True)
@@ -1357,21 +1362,26 @@ def build_change_triggered_posteriors_payload(
     if not pcols:
         raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
-    engaged_idx = _infer_engaged_state_idx(label_by_idx, rank_by_idx)
-    non_engaged_candidates = [
-        idx
-        for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
-        if idx != engaged_idx
-    ]
-    if not non_engaged_candidates:
-        raise ValueError("Change-triggered posteriors require at least two states.")
-    non_engaged_idx = int(non_engaged_candidates[0])
-    engaged_label = label_by_idx[engaged_idx]
-    non_engaged_label = label_by_idx[non_engaged_idx] if len(non_engaged_candidates) == 1 else "Non-engaged"
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
 
     rows = []
     work = df.sort_values(["subject", session_col, sort_col]).copy()
     for (subject, session), group in work.groupby(["subject", session_col], observed=True):
+        subject_label_by_idx, subject_rank_by_idx = subject_meta.get(subject) or subject_meta.get(str(subject)) or (
+            label_by_idx,
+            rank_by_idx,
+        )
+        engaged_idx = _infer_engaged_state_idx(subject_label_by_idx, subject_rank_by_idx)
+        non_engaged_candidates = [
+            idx
+            for idx in sorted(subject_label_by_idx, key=lambda state_idx: (subject_rank_by_idx.get(state_idx, state_idx), state_idx))
+            if idx != engaged_idx
+        ]
+        if not non_engaged_candidates:
+            continue
+        non_engaged_idx = int(non_engaged_candidates[0])
+        engaged_label = subject_label_by_idx[engaged_idx]
+        non_engaged_label = subject_label_by_idx[non_engaged_idx] if len(non_engaged_candidates) == 1 else "Non-engaged"
         probs = group[pcols].to_numpy(dtype=float)
         change_idx_by_direction = _confident_change_events_by_direction(
             probs,
@@ -1571,13 +1581,18 @@ def build_state_dwell_times_payload(
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
     work = df.sort_values(["subject", session_col, sort_col]).copy()
     rows = []
     state_source = "state_idx" if "state_idx" in work.columns else "state_label"
     for (subject, session), group in work.groupby(["subject", session_col], observed=True):
         values = group[state_source].to_list()
         labels = group["state_label"].astype(str).to_list()
-        ranks = group["state_idx"].map(rank_by_idx).fillna(group.get("state_rank", 0)).to_list() if "state_idx" in group.columns else [None] * len(group)
+        subject_label_by_idx, subject_rank_by_idx = subject_meta.get(subject) or subject_meta.get(str(subject)) or (
+            label_by_idx,
+            rank_by_idx,
+        )
+        ranks = group["state_idx"].map(subject_rank_by_idx).fillna(group.get("state_rank", 0)).to_list() if "state_idx" in group.columns else [None] * len(group)
         if not values:
             continue
         start = 0
@@ -1589,7 +1604,7 @@ def build_state_dwell_times_payload(
                         "subject": subject,
                         "session": session,
                         "state_idx": state_idx_value,
-                        "state_rank": rank_by_idx.get(state_idx_value, ranks[start]) if state_idx_value is not None else ranks[start],
+                        "state_rank": subject_rank_by_idx.get(state_idx_value, ranks[start]) if state_idx_value is not None else ranks[start],
                         "state_label": labels[start],
                         "dwell": idx - start,
                     }
@@ -1671,6 +1686,7 @@ def build_state_posterior_count_payload(
     if not pcols:
         raise ValueError("trial_df must contain posterior columns named p_state_0, p_state_1, ...")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
     count_df = (
         df.groupby(["subject", "state_label"], observed=True)
         .size()
@@ -1684,8 +1700,12 @@ def build_state_posterior_count_payload(
         value_name="probability",
     )
     posterior_df["state_idx"] = posterior_df["state_col"].str.rsplit("_", n=1).str[-1].astype(int)
-    posterior_df["state_label"] = posterior_df["state_idx"].map(label_by_idx).fillna(posterior_df["state_col"])
-    posterior_df["state_rank"] = posterior_df["state_idx"].map(rank_by_idx).fillna(posterior_df["state_idx"]).astype(int)
+    label_rank = [
+        _state_label_rank_for_subject(subject_meta, row.subject, int(row.state_idx), label_by_idx, rank_by_idx)
+        for row in posterior_df[["subject", "state_idx"]].itertuples(index=False)
+    ]
+    posterior_df["state_label"] = [item[0] for item in label_rank]
+    posterior_df["state_rank"] = [item[1] for item in label_rank]
     return {
         "count_df": count_df,
         "posterior_df": posterior_df,

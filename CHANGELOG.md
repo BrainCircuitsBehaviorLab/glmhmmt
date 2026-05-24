@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6
+- Fixed the rest of plots from postprocess: `build_session_trajectories_payload()`  `build_state_posterior_count_payload()` , `build_change_triggered_posteriors_payload()` , `build_state_dwell_times_payload()`.
+- Fixed bug in Model Manager widget from 0.3.5.
+
 ## 0.3.5
 - Updated Model Manager widget to show the scoring regressor
 
