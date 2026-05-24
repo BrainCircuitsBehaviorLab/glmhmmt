@@ -1,7 +1,10 @@
 # Changelog
 
+## 0.3.3
+- Updated the weights plot for 2 states transition weights in `transitions.py`. Now it only shows the weight towards engaged.
+
 ## 0.3.2
-- Updated the tests for 2 states transition weights in `transitions.py`.
+- Updated the t-tests for 2 states transition weights in `transitions.py`.
 
 ## 0.3.1
 - Changed input driven transitions to an identifiable Softmax in order to match ssm alternative input driven transitions.

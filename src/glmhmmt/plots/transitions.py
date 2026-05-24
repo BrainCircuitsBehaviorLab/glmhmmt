@@ -22,13 +22,9 @@ def _add_binary_zero_ttest_labels(
     df,
     *,
     features: Sequence[str],
-    state_order: Sequence[str],
+    reference_state: str,
 ) -> None:
     """Annotate binary centered transition weights with one-sample tests."""
-    if len(state_order) != 2:
-        return
-
-    reference_state = str(state_order[0])
     y_positions: list[float] = []
     for feat_idx, feature in enumerate(features):
         feature_mask = df["feature"].astype(str) == str(feature)
@@ -63,6 +59,45 @@ def _add_binary_zero_ttest_labels(
     if y_positions:
         _, top = ax.get_ylim()
         ax.set_ylim(top=max(top, max(y_positions) * 1.08))
+
+
+def _resolve_engaged_state_label(state_order: Sequence[str]) -> str | None:
+    """Return the engaged state label, falling back to the first binary target."""
+    labels = [str(label) for label in state_order]
+    for label in labels:
+        normalized = label.casefold()
+        if "engaged" in normalized and "disengaged" not in normalized:
+            return label
+    return labels[0] if labels else None
+
+
+def _binary_engaged_weights_df(
+    weights_df,
+    *,
+    K: int | None = None,
+    state_label_order: Sequence[str] | None = None,
+    feature_order: Sequence[str] | None = None,
+    abs_features: Sequence[str] = (),
+    feature_labeler: Callable[[str], str] | None = None,
+):
+    """Return prepared binary weights filtered to the engaged target state."""
+    df, features, _, state_order, _ = _prepare_weights_df(
+        weights_df,
+        K=K,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+    )
+    engaged_state = (
+        _resolve_engaged_state_label(state_order)
+        if len(state_order) == 2
+        else None
+    )
+    if engaged_state is None:
+        return df, features, state_order, None
+    plot_df = df[df["state_label"].astype(str) == engaged_state].copy()
+    return plot_df, features, [engaged_state], engaged_state
 
 
 def transition_weights_by_subject(
@@ -111,10 +146,20 @@ def transition_weights_summary_lineplot(
     tick_rotation: float = 35,
 ) -> plt.Axes:
     """Plot transition-weight means with the emission summary-line style."""
-    ax = emission_weights_summary_lineplot(
+    _plot_weights, _, _, _engaged_state = _binary_engaged_weights_df(
         weights_df,
         K=K,
         state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+    )
+    ax = emission_weights_summary_lineplot(
+        _plot_weights,
+        K=K,
+        state_label_order=(
+            [_engaged_state] if _engaged_state is not None else state_label_order
+        ),
         feature_order=feature_order,
         abs_features=abs_features,
         feature_labeler=feature_labeler,
@@ -123,7 +168,10 @@ def transition_weights_summary_lineplot(
         title=title,
         tick_rotation=tick_rotation,
     )
-    ax.set_ylabel("Transition weight")
+    if _engaged_state is not None:
+        ax.set_ylabel(f"Transition weight toward {_engaged_state}")
+    else:
+        ax.set_ylabel("Transition weight")
     return ax
 
 
@@ -147,11 +195,16 @@ def transition_weights_summary_boxplot(
 ) -> plt.Axes:
     """Plot transition-weight distributions with the emission boxplot style.
 
-    For two-state centered transition weights, ``show_ttests=True`` annotates a
-    one-sample t-test against zero for the first plotted target state. The other
-    target state is the negative mirror of that same binary contrast.
+    For two-state centered transition weights, only the engaged target-state
+    contrast is plotted. ``show_ttests=True`` annotates a one-sample t-test
+    against zero across subjects.
     """
-    _df, _features, _, _state_order, _ = _prepare_weights_df(
+    (
+        _plot_weights,
+        _features,
+        _plot_state_order,
+        _engaged_state,
+    ) = _binary_engaged_weights_df(
         weights_df,
         K=K,
         state_label_order=state_label_order,
@@ -159,11 +212,13 @@ def transition_weights_summary_boxplot(
         abs_features=abs_features,
         feature_labeler=feature_labeler,
     )
-    _use_binary_zero_ttests = bool(show_ttests and len(_state_order) == 2)
+
     ax = emission_weights_summary_boxplot(
-        weights_df,
+        _plot_weights,
         K=K,
-        state_label_order=state_label_order,
+        state_label_order=(
+            _plot_state_order if _engaged_state is not None else state_label_order
+        ),
         feature_order=feature_order,
         abs_features=abs_features,
         feature_labeler=feature_labeler,
@@ -171,20 +226,23 @@ def transition_weights_summary_boxplot(
         figsize=figsize,
         title=title,
         connect_subjects=connect_subjects,
-        show_ttests=show_ttests and not _use_binary_zero_ttests,
+        show_ttests=show_ttests and _engaged_state is None,
         subject_line_color=subject_line_color,
         subject_line_alpha=subject_line_alpha,
         subject_line_width=subject_line_width,
         tick_rotation=tick_rotation,
     )
-    if _use_binary_zero_ttests:
+    if show_ttests and _engaged_state is not None:
         _add_binary_zero_ttest_labels(
             ax,
-            _df,
+            _plot_weights,
             features=_features,
-            state_order=_state_order,
+            reference_state=_engaged_state,
         )
-    ax.set_ylabel("Transition weight")
+    if _engaged_state is not None:
+        ax.set_ylabel(f"Transition weight toward {_engaged_state}")
+    else:
+        ax.set_ylabel("Transition weight")
     return ax
 
 
