@@ -124,7 +124,7 @@ def test_transition_weight_plots_use_emission_style_dataframe():
 
     assert axes.shape == (1, 2)
     assert axes.ravel()[0].get_ylabel() == "Transition weight"
-    assert ax_summary.get_ylabel() == "Transition weight toward Engaged"
+    assert ax_summary.get_ylabel() == "Transition weight"
     assert [tick.get_text() for tick in ax_summary.get_xticklabels()] == ["A_plus", "A_minus"]
     assert [text.get_text() for text in ax_summary.get_legend().get_texts()] == ["Engaged"]
 

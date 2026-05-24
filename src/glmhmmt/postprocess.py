@@ -938,6 +938,74 @@ def _state_meta_from_trial_df(
     return state_order, label_by_idx, rank_by_idx
 
 
+def _state_meta_by_subject_from_trial_df(
+    df,
+    *,
+    subject_col: str = "subject",
+    state_idx_col: str = "state_idx",
+    state_label_col: str = "state_label",
+    state_rank_col: str = "state_rank",
+) -> dict:
+    """Return subject-specific raw-state label/rank maps.
+
+    Raw HMM state indices are only meaningful within a subject fit. State 0 can
+    be Engaged for one subject and Disengaged for another, so weighted payloads
+    that iterate raw probability columns must not use one global
+    ``state_idx -> label`` map.
+    """
+    if subject_col not in df.columns or state_idx_col not in df.columns or state_label_col not in df.columns:
+        return {}
+    cols = [subject_col, state_idx_col, state_label_col]
+    if state_rank_col in df.columns:
+        cols.append(state_rank_col)
+    meta = (
+        df[cols]
+        .rename(
+            columns={
+                subject_col: "subject",
+                state_idx_col: "state_idx",
+                state_label_col: "state_label",
+                state_rank_col: "state_rank",
+            }
+        )
+        .dropna(subset=["subject", "state_idx", "state_label"])
+        .drop_duplicates()
+    )
+    out = {}
+    for subject, group in meta.groupby("subject", observed=True):
+        label_by_idx = {
+            int(row.state_idx): str(row.state_label)
+            for row in group.itertuples(index=False)
+        }
+        if "state_rank" in group.columns:
+            rank_by_idx = {
+                int(row.state_idx): int(row.state_rank)
+                for row in group.itertuples(index=False)
+            }
+        else:
+            rank_by_idx = {idx: idx for idx in label_by_idx}
+        out[subject] = (label_by_idx, rank_by_idx)
+        out[str(subject)] = (label_by_idx, rank_by_idx)
+    return out
+
+
+def _state_label_rank_for_subject(
+    subject_meta: dict,
+    subject,
+    state_idx: int,
+    fallback_label_by_idx: dict[int, str],
+    fallback_rank_by_idx: dict[int, int],
+) -> tuple[str, int]:
+    label_by_idx, rank_by_idx = subject_meta.get(subject) or subject_meta.get(str(subject)) or (
+        fallback_label_by_idx,
+        fallback_rank_by_idx,
+    )
+    return (
+        label_by_idx.get(state_idx, f"State {state_idx}"),
+        rank_by_idx.get(state_idx, state_idx),
+    )
+
+
 def _augment_state_meta_from_prob_cols(
     pcols: list[str],
     label_by_idx: dict[int, str],
@@ -1106,6 +1174,7 @@ def build_state_accuracy_payload(
     _require_columns(df, ["subject", performance_col], name="trial_df")
     assignment = str(state_assignment).lower()
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
     work = df.dropna(subset=["subject", performance_col]).copy()
     work[performance_col] = work[performance_col].astype(float)
 
@@ -1126,6 +1195,13 @@ def build_state_accuracy_payload(
             y = group[performance_col].to_numpy(dtype=float)
             for pcol in pcols:
                 state_idx = int(pcol.rsplit("_", 1)[1])
+                state_label, state_rank = _state_label_rank_for_subject(
+                    subject_meta,
+                    subject,
+                    state_idx,
+                    label_by_idx,
+                    rank_by_idx,
+                )
                 weights = pd.to_numeric(group[pcol], errors="coerce").to_numpy(dtype=float)
                 mask = np.isfinite(y) & np.isfinite(weights) & (weights > 0.0)
                 weight_sum = float(weights[mask].sum()) if np.any(mask) else 0.0
@@ -1135,8 +1211,8 @@ def build_state_accuracy_payload(
                     {
                         "subject": subject,
                         "state_idx": state_idx,
-                        "state_rank": rank_by_idx.get(state_idx, state_idx),
-                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "state_rank": state_rank,
+                        "state_label": state_label,
                         "accuracy": float(np.dot(y[mask], weights[mask]) / weight_sum),
                         "n_trials": weight_sum,
                     }
@@ -1156,6 +1232,13 @@ def build_state_accuracy_payload(
             y = group[performance_col].to_numpy(dtype=float)
             for pcol in pcols:
                 state_idx = int(pcol.rsplit("_", 1)[1])
+                state_label, state_rank = _state_label_rank_for_subject(
+                    subject_meta,
+                    subject,
+                    state_idx,
+                    label_by_idx,
+                    rank_by_idx,
+                )
                 weights = pd.to_numeric(group[pcol], errors="coerce").to_numpy(dtype=float)
                 mask = np.isfinite(y) & np.isfinite(weights) & (weights > 0.0)
                 weight_sum = float(weights[mask].sum()) if np.any(mask) else 0.0
@@ -1165,8 +1248,8 @@ def build_state_accuracy_payload(
                     {
                         "subject": subject,
                         "state_idx": state_idx,
-                        "state_rank": rank_by_idx.get(state_idx, state_idx),
-                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "state_rank": state_rank,
+                        "state_label": state_label,
                         "accuracy": float(np.dot(y[mask], weights[mask]) / weight_sum),
                         "n_trials": weight_sum,
                     }
@@ -1358,6 +1441,7 @@ def build_state_occupancy_payload(
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
     state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    subject_meta = _state_meta_by_subject_from_trial_df(df)
     work = df.sort_values(["subject", session_col, sort_col]).copy()
 
     source = str(occupancy_source).lower()
@@ -1383,13 +1467,20 @@ def build_state_occupancy_payload(
                 continue
             for pcol in pcols:
                 state_idx = int(pcol.rsplit("_", 1)[1])
+                state_label, state_rank = _state_label_rank_for_subject(
+                    subject_meta,
+                    subject,
+                    state_idx,
+                    label_by_idx,
+                    rank_by_idx,
+                )
                 expected_trials = float(pd.to_numeric(group[pcol], errors="coerce").fillna(0.0).sum())
                 occ_rows.append(
                     {
                         "subject": subject,
                         "state_idx": state_idx,
-                        "state_rank": rank_by_idx.get(state_idx, state_idx),
-                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "state_rank": state_rank,
+                        "state_label": state_label,
                         "n_trials": expected_trials,
                         "n_total": n_total,
                         "occupancy": expected_trials / n_total,
@@ -1404,14 +1495,21 @@ def build_state_occupancy_payload(
                 continue
             for pcol in pcols:
                 state_idx = int(pcol.rsplit("_", 1)[1])
+                state_label, state_rank = _state_label_rank_for_subject(
+                    subject_meta,
+                    subject,
+                    state_idx,
+                    label_by_idx,
+                    rank_by_idx,
+                )
                 expected_trials = float(pd.to_numeric(group[pcol], errors="coerce").fillna(0.0).sum())
                 session_rows.append(
                     {
                         "subject": subject,
                         "session": session,
                         "state_idx": state_idx,
-                        "state_rank": rank_by_idx.get(state_idx, state_idx),
-                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "state_rank": state_rank,
+                        "state_label": state_label,
                         "n_trials": expected_trials,
                         "n_total": n_total,
                         "occupancy": expected_trials / n_total,
