@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.4
+- Fixed postrocess state assignment in state accuracy and occupancy.
+
 ## 0.3.3
 - Updated the weights plot for 2 states transition weights in `transitions.py`. Now it only shows the weight towards engaged.
 
