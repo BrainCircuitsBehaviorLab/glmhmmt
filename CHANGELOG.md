@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2
+- Updated the tests for 2 states transition weights in `transitions.py`.
+
 ## 0.3.1
 - Changed input driven transitions to an identifiable Softmax in order to match ssm alternative input driven transitions.
 
