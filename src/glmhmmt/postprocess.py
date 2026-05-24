@@ -128,11 +128,16 @@ def build_trial_df(
     * ``p_state_0`` … ``p_state_{K-1}``  — HMM posterior (direct copy)
     * ``p_state_pred_0`` … ``p_state_pred_{K-1}``  — one-step predictive
       state probabilities, when available
-    * ``state_idx``, ``state_rank``, ``state_label``  — MAP assignment
+    * ``state_idx``, ``state_rank``, ``state_label``  — smoothed posterior
+      MAP assignment
+    * ``state_idx_pred``, ``state_rank_pred``, ``state_label_pred``  —
+      one-step predictive MAP assignment that excludes the current choice
     * ``pL`` [, ``pC``], ``pR``  — marginal class probabilities from p_pred
     * ``pL_state_0`` …, ``pR_state_0`` …  — per-trial state-conditional
       class probabilities ``P(y_t = c | z_t = k, x_t)``
     * ``p_model_correct``  — MAP-state emission P(correct class)
+    * ``p_model_correct_pred_state``  — predictive-MAP-state emission
+      P(correct class)
     * ``p_model_correct_marginal``  — marginal P(correct class)
     * ``correct_bool``
     """
@@ -207,6 +212,14 @@ def build_trial_df(
     map_k = view.map_states()  # (T,) int
     state_rank_arr = np.array([view.state_rank_by_idx.get(int(ki), ki) for ki in map_k], dtype=np.int32)
     state_label_arr = np.array([view.state_name_by_idx.get(int(ki), f"State {ki}") for ki in map_k])
+    pred_map_k = view.predictive_map_states()  # (T,) int; excludes y_t
+    state_rank_pred_arr = np.array(
+        [view.state_rank_by_idx.get(int(ki), ki) for ki in pred_map_k],
+        dtype=np.int32,
+    )
+    state_label_pred_arr = np.array(
+        [view.state_name_by_idx.get(int(ki), f"State {ki}") for ki in pred_map_k]
+    )
 
     # ── state-conditional emission probabilities on the observed trials ──────
     C = view.num_classes
@@ -232,6 +245,7 @@ def build_trial_df(
         )
 
     p_model_correct_map = p_map[np.arange(T), correct_class]
+    p_model_correct_pred_state = p_state_conditional[np.arange(T), pred_map_k, correct_class]
 
     # ── marginal class probabilities (from view.p_pred if available) ──────────
     if view.p_pred is None:
@@ -253,7 +267,11 @@ def build_trial_df(
         pl.Series("state_idx", map_k.astype(np.int32)),
         pl.Series("state_rank", state_rank_arr),
         pl.Series("state_label", state_label_arr),
+        pl.Series("state_idx_pred", pred_map_k.astype(np.int32)),
+        pl.Series("state_rank_pred", state_rank_pred_arr),
+        pl.Series("state_label_pred", state_label_pred_arr),
         pl.Series("p_model_correct", p_model_correct_map.astype(np.float64)),
+        pl.Series("p_model_correct_pred_state", p_model_correct_pred_state.astype(np.float64)),
         pl.Series("p_model_correct_marginal", p_marginal_correct.astype(np.float64)),
     ]
 
@@ -865,16 +883,40 @@ def _posterior_cols(df) -> list[str]:
     return sorted(cols, key=lambda col: int(col.rsplit("_", 1)[1]))
 
 
+def _predictive_state_cols(df) -> list[str]:
+    cols = [
+        col for col in df.columns
+        if isinstance(col, str) and col.startswith("p_state_pred_") and col.removeprefix("p_state_pred_").isdigit()
+    ]
+    return sorted(cols, key=lambda col: int(col.rsplit("_", 1)[1]))
+
+
 def _require_columns(df, required: list[str], *, name: str) -> None:
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"{name} is missing required columns: {missing}.")
 
 
-def _state_meta_from_trial_df(df) -> tuple[list[str], dict[int, str], dict[int, int]]:
-    _require_columns(df, ["state_idx", "state_label"], name="trial_df")
+def _state_meta_from_trial_df(
+    df,
+    *,
+    state_idx_col: str = "state_idx",
+    state_label_col: str = "state_label",
+    state_rank_col: str = "state_rank",
+) -> tuple[list[str], dict[int, str], dict[int, int]]:
+    _require_columns(df, [state_idx_col, state_label_col], name="trial_df")
+    cols = [state_idx_col, state_label_col]
+    if state_rank_col in df.columns:
+        cols.append(state_rank_col)
     meta = (
-        df[["state_idx", "state_label", *([ "state_rank" ] if "state_rank" in df.columns else [])]]
+        df[cols]
+        .rename(
+            columns={
+                state_idx_col: "state_idx",
+                state_label_col: "state_label",
+                state_rank_col: "state_rank",
+            }
+        )
         .dropna(subset=["state_idx", "state_label"])
         .drop_duplicates()
     )
@@ -889,6 +931,23 @@ def _state_meta_from_trial_df(df) -> tuple[list[str], dict[int, str], dict[int, 
         }
     else:
         rank_by_idx = {idx: idx for idx in label_by_idx}
+    state_order = [
+        label_by_idx[idx]
+        for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
+    ]
+    return state_order, label_by_idx, rank_by_idx
+
+
+def _augment_state_meta_from_prob_cols(
+    pcols: list[str],
+    label_by_idx: dict[int, str],
+    rank_by_idx: dict[int, int],
+) -> tuple[list[str], dict[int, str], dict[int, int]]:
+    """Ensure state metadata covers every probability column."""
+    for col in pcols:
+        idx = int(col.rsplit("_", 1)[1])
+        label_by_idx.setdefault(idx, f"State {idx}")
+        rank_by_idx.setdefault(idx, idx)
     state_order = [
         label_by_idx[idx]
         for idx in sorted(label_by_idx, key=lambda state_idx: (rank_by_idx.get(state_idx, state_idx), state_idx))
@@ -1032,20 +1091,113 @@ def build_state_accuracy_payload(
     trial_df,
     *,
     performance_col: str = "correct_bool",
+    state_assignment: str = "predictive_weighted",
     chance_level: float | None = None,
     title: str = "Accuracy by state",
 ) -> dict:
-    """Prepare the payload consumed by ``plot_state_accuracy``."""
+    """Prepare the payload consumed by ``plot_state_accuracy``.
+
+    By default this uses one-step predictive state probabilities
+    (``p_state_pred_*``), so empirical state-conditioned accuracy excludes the
+    current choice from the state assignment. Pass ``state_assignment="posterior_map"``
+    to reproduce the older hard smoothed-MAP grouping.
+    """
     df = _as_pandas_df(trial_df, name="trial_df")
-    _require_columns(df, ["subject", "state_label", performance_col], name="trial_df")
-    state_order, _, _ = _state_meta_from_trial_df(df)
-    work = df.dropna(subset=["subject", "state_label", performance_col]).copy()
+    _require_columns(df, ["subject", performance_col], name="trial_df")
+    assignment = str(state_assignment).lower()
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
+    work = df.dropna(subset=["subject", performance_col]).copy()
     work[performance_col] = work[performance_col].astype(float)
-    accuracy_df = (
-        work.groupby(["subject", "state_label"], observed=True)
-        .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
-        .reset_index()
-    )
+
+    if assignment in {"predictive_weighted", "weighted", "predictive"}:
+        pcols = _predictive_state_cols(work)
+        if not pcols:
+            raise ValueError(
+                "state_assignment='predictive_weighted' requires p_state_pred_0, "
+                "p_state_pred_1, ... columns. Rebuild trial_df with the updated export."
+            )
+        state_order, label_by_idx, rank_by_idx = _augment_state_meta_from_prob_cols(
+            pcols,
+            label_by_idx,
+            rank_by_idx,
+        )
+        rows = []
+        for subject, group in work.groupby("subject", observed=True):
+            y = group[performance_col].to_numpy(dtype=float)
+            for pcol in pcols:
+                state_idx = int(pcol.rsplit("_", 1)[1])
+                weights = pd.to_numeric(group[pcol], errors="coerce").to_numpy(dtype=float)
+                mask = np.isfinite(y) & np.isfinite(weights) & (weights > 0.0)
+                weight_sum = float(weights[mask].sum()) if np.any(mask) else 0.0
+                if weight_sum <= 0.0:
+                    continue
+                rows.append(
+                    {
+                        "subject": subject,
+                        "state_idx": state_idx,
+                        "state_rank": rank_by_idx.get(state_idx, state_idx),
+                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "accuracy": float(np.dot(y[mask], weights[mask]) / weight_sum),
+                        "n_trials": weight_sum,
+                    }
+                )
+        accuracy_df = pd.DataFrame(rows)
+    elif assignment in {"posterior_weighted", "smoothed_weighted"}:
+        pcols = _posterior_cols(work)
+        if not pcols:
+            raise ValueError("state_assignment='posterior_weighted' requires p_state_0, p_state_1, ... columns.")
+        state_order, label_by_idx, rank_by_idx = _augment_state_meta_from_prob_cols(
+            pcols,
+            label_by_idx,
+            rank_by_idx,
+        )
+        rows = []
+        for subject, group in work.groupby("subject", observed=True):
+            y = group[performance_col].to_numpy(dtype=float)
+            for pcol in pcols:
+                state_idx = int(pcol.rsplit("_", 1)[1])
+                weights = pd.to_numeric(group[pcol], errors="coerce").to_numpy(dtype=float)
+                mask = np.isfinite(y) & np.isfinite(weights) & (weights > 0.0)
+                weight_sum = float(weights[mask].sum()) if np.any(mask) else 0.0
+                if weight_sum <= 0.0:
+                    continue
+                rows.append(
+                    {
+                        "subject": subject,
+                        "state_idx": state_idx,
+                        "state_rank": rank_by_idx.get(state_idx, state_idx),
+                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "accuracy": float(np.dot(y[mask], weights[mask]) / weight_sum),
+                        "n_trials": weight_sum,
+                    }
+                )
+        accuracy_df = pd.DataFrame(rows)
+    else:
+        if assignment in {"predictive_map", "pred_map"}:
+            state_idx_col, state_rank_col, state_label_col = "state_idx_pred", "state_rank_pred", "state_label_pred"
+        elif assignment in {"posterior_map", "map", "smoothed_map"}:
+            state_idx_col, state_rank_col, state_label_col = "state_idx", "state_rank", "state_label"
+        else:
+            raise ValueError(
+                "state_assignment must be one of 'predictive_weighted', "
+                "'posterior_weighted', 'predictive_map', or 'posterior_map'."
+            )
+        _require_columns(df, [state_idx_col, state_label_col], name="trial_df")
+        state_order, _, _ = _state_meta_from_trial_df(
+            df,
+            state_idx_col=state_idx_col,
+            state_label_col=state_label_col,
+            state_rank_col=state_rank_col,
+        )
+        hard = df.dropna(subset=["subject", state_label_col, performance_col]).copy()
+        hard[performance_col] = hard[performance_col].astype(float)
+        accuracy_df = (
+            hard.groupby(["subject", state_label_col], observed=True)
+            .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
+            .reset_index()
+            .rename(columns={state_label_col: "state_label"})
+        )
+
     all_df = (
         work.groupby("subject", observed=True)
         .agg(accuracy=(performance_col, "mean"), n_trials=(performance_col, "size"))
@@ -1056,6 +1208,7 @@ def build_state_accuracy_payload(
     return {
         "accuracy_df": accuracy_df,
         "state_order": state_order,
+        "state_assignment": assignment,
         "chance_level": chance_level,
         "title": title,
     }
@@ -1193,34 +1346,99 @@ def build_state_occupancy_payload(
     *,
     session_col: str = "session",
     sort_col: str = "trial_idx",
+    occupancy_source: str = "posterior",
     title: str = "State occupancy",
 ) -> dict:
-    """Prepare occupancy and MAP-switch summaries."""
+    """Prepare occupancy and MAP-switch summaries.
+
+    Occupancy defaults to the mean smoothed posterior mass per state, which is
+    the HMM fractional-occupancy quantity. Switch counts remain hard
+    smoothed-MAP transitions because dwell/switch summaries are path summaries.
+    """
     df = _as_pandas_df(trial_df, name="trial_df")
     _require_columns(df, ["subject", session_col, sort_col, "state_label"], name="trial_df")
-    state_order, _, _ = _state_meta_from_trial_df(df)
+    state_order, label_by_idx, rank_by_idx = _state_meta_from_trial_df(df)
     work = df.sort_values(["subject", session_col, sort_col]).copy()
 
-    subj_totals = work.groupby("subject", observed=True).size().rename("n_total")
-    occupancy_df = (
-        work.groupby(["subject", "state_label"], observed=True)
-        .size()
-        .rename("n_trials")
-        .reset_index()
-        .merge(subj_totals.reset_index(), on="subject", how="left")
-    )
-    occupancy_df["occupancy"] = occupancy_df["n_trials"] / occupancy_df["n_total"]
+    source = str(occupancy_source).lower()
+    if source in {"posterior", "smoothed", "smoothed_probs"}:
+        pcols = _posterior_cols(work)
+    elif source in {"predictive", "pred", "predictive_state"}:
+        pcols = _predictive_state_cols(work)
+    elif source in {"map", "posterior_map", "hard"}:
+        pcols = []
+    else:
+        raise ValueError("occupancy_source must be 'posterior', 'predictive', or 'posterior_map'.")
 
-    session_totals = work.groupby(["subject", session_col], observed=True).size().rename("n_total")
-    session_occupancy_df = (
-        work.groupby(["subject", session_col, "state_label"], observed=True)
-        .size()
-        .rename("n_trials")
-        .reset_index()
-        .merge(session_totals.reset_index(), on=["subject", session_col], how="left")
-    )
-    session_occupancy_df["occupancy"] = session_occupancy_df["n_trials"] / session_occupancy_df["n_total"]
-    session_occupancy_df = session_occupancy_df.rename(columns={session_col: "session"})
+    if pcols:
+        state_order, label_by_idx, rank_by_idx = _augment_state_meta_from_prob_cols(
+            pcols,
+            label_by_idx,
+            rank_by_idx,
+        )
+        occ_rows = []
+        for subject, group in work.groupby("subject", observed=True):
+            n_total = float(len(group))
+            if n_total <= 0:
+                continue
+            for pcol in pcols:
+                state_idx = int(pcol.rsplit("_", 1)[1])
+                expected_trials = float(pd.to_numeric(group[pcol], errors="coerce").fillna(0.0).sum())
+                occ_rows.append(
+                    {
+                        "subject": subject,
+                        "state_idx": state_idx,
+                        "state_rank": rank_by_idx.get(state_idx, state_idx),
+                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "n_trials": expected_trials,
+                        "n_total": n_total,
+                        "occupancy": expected_trials / n_total,
+                    }
+                )
+        occupancy_df = pd.DataFrame(occ_rows)
+
+        session_rows = []
+        for (subject, session), group in work.groupby(["subject", session_col], observed=True):
+            n_total = float(len(group))
+            if n_total <= 0:
+                continue
+            for pcol in pcols:
+                state_idx = int(pcol.rsplit("_", 1)[1])
+                expected_trials = float(pd.to_numeric(group[pcol], errors="coerce").fillna(0.0).sum())
+                session_rows.append(
+                    {
+                        "subject": subject,
+                        "session": session,
+                        "state_idx": state_idx,
+                        "state_rank": rank_by_idx.get(state_idx, state_idx),
+                        "state_label": label_by_idx.get(state_idx, f"State {state_idx}"),
+                        "n_trials": expected_trials,
+                        "n_total": n_total,
+                        "occupancy": expected_trials / n_total,
+                    }
+                )
+        session_occupancy_df = pd.DataFrame(session_rows)
+    else:
+        subj_totals = work.groupby("subject", observed=True).size().rename("n_total")
+        occupancy_df = (
+            work.groupby(["subject", "state_label"], observed=True)
+            .size()
+            .rename("n_trials")
+            .reset_index()
+            .merge(subj_totals.reset_index(), on="subject", how="left")
+        )
+        occupancy_df["occupancy"] = occupancy_df["n_trials"] / occupancy_df["n_total"]
+
+        session_totals = work.groupby(["subject", session_col], observed=True).size().rename("n_total")
+        session_occupancy_df = (
+            work.groupby(["subject", session_col, "state_label"], observed=True)
+            .size()
+            .rename("n_trials")
+            .reset_index()
+            .merge(session_totals.reset_index(), on=["subject", session_col], how="left")
+        )
+        session_occupancy_df["occupancy"] = session_occupancy_df["n_trials"] / session_occupancy_df["n_total"]
+        session_occupancy_df = session_occupancy_df.rename(columns={session_col: "session"})
 
     state_source = "state_idx" if "state_idx" in work.columns else "state_label"
     switches = []
@@ -1234,6 +1452,7 @@ def build_state_occupancy_payload(
         "session_occupancy_df": session_occupancy_df,
         "switches_df": switches_df,
         "state_order": state_order,
+        "occupancy_source": source,
         "title": title,
     }
 

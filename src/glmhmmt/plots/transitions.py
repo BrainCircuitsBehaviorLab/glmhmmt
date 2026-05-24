@@ -6,12 +6,63 @@ from collections.abc import Callable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from scipy.stats import ttest_1samp
 
 from glmhmmt.plots.emissions import (
+    _prepare_weights_df,
     emission_weights_by_subject,
     emission_weights_summary_boxplot,
     emission_weights_summary_lineplot,
 )
+from glmhmmt.plots.common import significance_label
+
+
+def _add_binary_zero_ttest_labels(
+    ax: plt.Axes,
+    df,
+    *,
+    features: Sequence[str],
+    state_order: Sequence[str],
+) -> None:
+    """Annotate binary centered transition weights with one-sample tests."""
+    if len(state_order) != 2:
+        return
+
+    reference_state = str(state_order[0])
+    y_positions: list[float] = []
+    for feat_idx, feature in enumerate(features):
+        feature_mask = df["feature"].astype(str) == str(feature)
+        feature_values = df.loc[feature_mask, "weight"].to_numpy(dtype=float)
+        finite_feature_values = feature_values[np.isfinite(feature_values)]
+        if finite_feature_values.size == 0:
+            continue
+
+        values = df.loc[
+            feature_mask & (df["state_label"].astype(str) == reference_state),
+            "weight",
+        ].to_numpy(dtype=float)
+        values = values[np.isfinite(values)]
+        if values.size < 2:
+            continue
+
+        y_range = float(finite_feature_values.max() - finite_feature_values.min())
+        if not np.isfinite(y_range) or y_range <= 0:
+            y_range = 1.0
+        y = float(finite_feature_values.max()) + y_range * 0.12
+        pvalue = float(ttest_1samp(values, popmean=0.0).pvalue)
+        ax.text(
+            feat_idx,
+            y,
+            significance_label(pvalue),
+            ha="center",
+            va="bottom",
+            color="black",
+        )
+        y_positions.append(y)
+
+    if y_positions:
+        _, top = ax.get_ylim()
+        ax.set_ylim(top=max(top, max(y_positions) * 1.08))
 
 
 def transition_weights_by_subject(
@@ -94,7 +145,21 @@ def transition_weights_summary_boxplot(
     subject_line_width: float = 1.0,
     tick_rotation: float = 35,
 ) -> plt.Axes:
-    """Plot transition-weight distributions with the emission boxplot style."""
+    """Plot transition-weight distributions with the emission boxplot style.
+
+    For two-state centered transition weights, ``show_ttests=True`` annotates a
+    one-sample t-test against zero for the first plotted target state. The other
+    target state is the negative mirror of that same binary contrast.
+    """
+    _df, _features, _, _state_order, _ = _prepare_weights_df(
+        weights_df,
+        K=K,
+        state_label_order=state_label_order,
+        feature_order=feature_order,
+        abs_features=abs_features,
+        feature_labeler=feature_labeler,
+    )
+    _use_binary_zero_ttests = bool(show_ttests and len(_state_order) == 2)
     ax = emission_weights_summary_boxplot(
         weights_df,
         K=K,
@@ -106,12 +171,19 @@ def transition_weights_summary_boxplot(
         figsize=figsize,
         title=title,
         connect_subjects=connect_subjects,
-        show_ttests=show_ttests,
+        show_ttests=show_ttests and not _use_binary_zero_ttests,
         subject_line_color=subject_line_color,
         subject_line_alpha=subject_line_alpha,
         subject_line_width=subject_line_width,
         tick_rotation=tick_rotation,
     )
+    if _use_binary_zero_ttests:
+        _add_binary_zero_ttest_labels(
+            ax,
+            _df,
+            features=_features,
+            state_order=_state_order,
+        )
     ax.set_ylabel("Transition weight")
     return ax
 

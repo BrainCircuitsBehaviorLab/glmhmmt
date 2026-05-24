@@ -272,6 +272,10 @@ class SubjectFitView:
         """Return MAP state assignment ``(T,)`` = argmax(smoothed_probs, axis=1)."""
         return np.argmax(self.smoothed_probs, axis=1).astype(int)
 
+    def predictive_map_states(self) -> np.ndarray:
+        """Return non-leaky MAP assignment from one-step predictive state mass."""
+        return np.argmax(self.predictive_state_probs, axis=1).astype(int)
+
     def engaged_k(self) -> int:
         """Index of the Engaged state (rank 0)."""
         for k, rank in self.state_rank_by_idx.items():

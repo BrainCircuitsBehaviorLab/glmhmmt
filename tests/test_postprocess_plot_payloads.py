@@ -24,8 +24,13 @@ def _trial_df() -> pd.DataFrame:
             "state_idx": [0, 0, 1, 1, 1, 0] * 2,
             "state_rank": [0, 0, 1, 1, 1, 0] * 2,
             "state_label": ["Engaged", "Engaged", "Disengaged", "Disengaged", "Disengaged", "Engaged"] * 2,
+            "state_idx_pred": [0, 1, 1, 1, 0, 0] * 2,
+            "state_rank_pred": [0, 1, 1, 1, 0, 0] * 2,
+            "state_label_pred": ["Engaged", "Disengaged", "Disengaged", "Disengaged", "Engaged", "Engaged"] * 2,
             "p_state_0": [0.8, 0.7, 0.2, 0.3, 0.4, 0.9] * 2,
             "p_state_1": [0.2, 0.3, 0.8, 0.7, 0.6, 0.1] * 2,
+            "p_state_pred_0": [0.7, 0.4, 0.3, 0.2, 0.6, 0.8] * 2,
+            "p_state_pred_1": [0.3, 0.6, 0.7, 0.8, 0.4, 0.2] * 2,
             "correct_bool": [1, 1, 0, 1, 0, 1] * 2,
             "response": [0, 0, 1, 1, 1, 0] * 2,
             "A_plus": [0.1, 0.2, 0.4, 0.3, 0.2, 0.1] * 2,
@@ -82,6 +87,23 @@ def test_common_state_plots_keep_payload_contracts():
         Figure,
     )
     assert isinstance(model_plots.plot_session_deepdive(build_session_deepdive_payload(df, subject="s1", session=1)), Figure)
+
+
+def test_state_accuracy_defaults_to_predictive_weighted_assignment():
+    df = _trial_df()
+    payload = build_state_accuracy_payload(df)
+    accuracy = payload["accuracy_df"]
+    engaged = accuracy[
+        (accuracy["subject"] == "s1")
+        & (accuracy["state_label"] == "Engaged")
+    ].iloc[0]
+
+    weights = df.loc[df["subject"] == "s1", "p_state_pred_0"].to_numpy()
+    y = df.loc[df["subject"] == "s1", "correct_bool"].to_numpy(dtype=float)
+
+    assert payload["state_assignment"] == "predictive_weighted"
+    assert abs(engaged["accuracy"] - (weights @ y) / weights.sum()) < 1e-12
+    assert abs(engaged["n_trials"] - weights.sum()) < 1e-12
 
 
 def test_change_triggered_payload_uses_posterior_direction_and_non_engaged_trace():

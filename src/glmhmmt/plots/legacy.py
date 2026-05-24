@@ -259,11 +259,12 @@ def plot_categorical_performance_by_state(
     if not isinstance(df, pl.DataFrame):
         df = pl.from_pandas(df)
 
-    if "state_rank" not in df.columns:
-        raise ValueError("df must contain 'state_rank' (from build_trial_df).")
+    state_rank_col = "state_rank_pred" if "state_rank_pred" in df.columns else "state_rank"
+    if state_rank_col not in df.columns:
+        raise ValueError("df must contain 'state_rank_pred' or 'state_rank' (from build_trial_df).")
 
     # resolve K
-    K = next(iter(views.values())).K if views else int(df["state_rank"].max()) + 1
+    K = next(iter(views.values())).K if views else int(df[state_rank_col].max()) + 1
 
     # resolve labels by rank
     state_labels = {}
@@ -272,7 +273,7 @@ def plot_categorical_performance_by_state(
             rank = v.state_rank_by_idx[int(raw_idx)]
             state_labels.setdefault(rank, lbl)
 
-    df = df.with_columns(pl.col("state_rank").cast(pl.Int64).alias("_state_k"))
+    df = df.with_columns(pl.col(state_rank_col).cast(pl.Int64).alias("_state_k"))
 
     _state_colors = {
         k: get_state_color(state_labels.get(k, f"State {k}"), k, K=K)
