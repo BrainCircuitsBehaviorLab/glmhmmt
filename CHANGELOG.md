@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.5
+- Updated Model Manager widget to show the scoring regressor
+
 ## 0.3.4
 - Fixed postrocess state assignment in state accuracy and occupancy.
 

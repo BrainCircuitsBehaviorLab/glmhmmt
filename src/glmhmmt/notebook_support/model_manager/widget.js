@@ -1,4 +1,3 @@
-function escapeHTML(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -211,6 +210,71 @@ function renderFrozenTable(numStates, selectedFeatures, frozenEmissions) {
   `;
 }
 
+function renderStateScoringControls(selectedFeatures, feature, rule, splitFeature, splitRule) {
+  const features = [...new Set((selectedFeatures || []).filter(Boolean))];
+  if (!features.length) {
+    return '<p class="mm-empty-note">Select emission regressors to configure state scoring.</p>';
+  }
+  const selectedFeature = features.includes(feature) ? feature : features[0];
+  const selectedSplit = features.includes(splitFeature) ? splitFeature : "";
+  const selectedRule = ["+", "-", "abs"].includes(rule) ? rule : "+";
+  const selectedSplitRule = ["+", "-", "abs"].includes(splitRule) ? splitRule : "+";
+  const featureOptions = features
+    .map(
+      (name) => `
+        <option value="${escapeHTML(name)}" ${selectedFeature === name ? "selected" : ""}>
+          ${escapeHTML(name)}
+        </option>
+      `,
+    )
+    .join("");
+  const splitOptions = [
+    `<option value="" ${selectedSplit === "" ? "selected" : ""}>(none)</option>`,
+    ...features.map(
+      (name) => `
+        <option value="${escapeHTML(name)}" ${selectedSplit === name ? "selected" : ""}>
+          ${escapeHTML(name)}
+        </option>
+      `,
+    ),
+  ].join("");
+
+  const ruleOptions = (current) => `
+    <option value="+" ${current === "+" ? "selected" : ""}>+</option>
+    <option value="-" ${current === "-" ? "selected" : ""}>-</option>
+    <option value="abs" ${current === "abs" ? "selected" : ""}>abs</option>
+  `;
+
+  return `
+    <div class="mm-state-scoring-grid">
+      <div>
+        <label class="mm-sub-label">Score regressor</label>
+        <select id="inp-state-scoring-feature" class="mm-input">
+          ${featureOptions}
+        </select>
+      </div>
+      <div>
+        <label class="mm-sub-label">Rule</label>
+        <select id="inp-state-scoring-rule" class="mm-input">
+          ${ruleOptions(selectedRule)}
+        </select>
+      </div>
+      <div>
+        <label class="mm-sub-label">L/R split regressor</label>
+        <select id="inp-state-split-feature" class="mm-input">
+          ${splitOptions}
+        </select>
+      </div>
+      <div>
+        <label class="mm-sub-label">Split rule</label>
+        <select id="inp-state-split-rule" class="mm-input">
+          ${ruleOptions(selectedSplitRule)}
+        </select>
+      </div>
+    </div>
+  `;
+}
+
 function renderLoadTable(existingInfo, existingVal, showTransitionRegressors) {
   const rows = existingInfo || [];
   if (!rows.length) {
@@ -326,6 +390,10 @@ function render({ model, el }) {
     const emissionGroups = model.get("emission_groups") || [];
     const transitionGroups = model.get("transition_groups") || [];
     const currentFrozen = model.get("frozen_emissions") || {};
+    const currentStateScoringFeature = model.get("state_scoring_feature") || "";
+    const currentStateScoringRule = model.get("state_scoring_rule") || "+";
+    const currentStateSplitFeature = model.get("state_split_feature") || "";
+    const currentStateSplitRule = model.get("state_split_rule") || "+";
     const alias = model.get("alias") || "";
     const aliasError = model.get("alias_error") || "";
     const aliasStatus = model.get("alias_status") || "";
@@ -448,6 +516,17 @@ function render({ model, el }) {
       if (modelType !== "glm") {
         const frozenFeatures = featuresForFreezeTable(currentEmission, emissionGroups);
         html += `
+          <div class="mm-section">
+            <label class="mm-label">State Scoring</label>
+            ${renderStateScoringControls(
+              currentEmission,
+              currentStateScoringFeature,
+              currentStateScoringRule,
+              currentStateSplitFeature,
+              currentStateSplitRule,
+            )}
+          </div>
+
           <div class="mm-section">
             <label class="mm-label">Frozen Emission Weights</label>
             ${renderFrozenTable(currentK, frozenFeatures, currentFrozen)}
@@ -709,6 +788,22 @@ function render({ model, el }) {
 
     bind("#inp-lapse-mode", "change", (event) => {
       setTrait("lapse_mode", event.target.value);
+    });
+
+    bind("#inp-state-scoring-feature", "change", (event) => {
+      setTrait("state_scoring_feature", event.target.value);
+    });
+
+    bind("#inp-state-scoring-rule", "change", (event) => {
+      setTrait("state_scoring_rule", event.target.value);
+    });
+
+    bind("#inp-state-split-feature", "change", (event) => {
+      setTrait("state_split_feature", event.target.value);
+    });
+
+    bind("#inp-state-split-rule", "change", (event) => {
+      setTrait("state_split_rule", event.target.value);
     });
 
     const commitFreezeInput = (input) => {

@@ -194,6 +194,10 @@ class model_cfg:
     emission_cols: list[str] = field(default_factory=list)
     transition_cols: list[str] = field(default_factory=list)
     frozen_emissions: dict[str, Any] = field(default_factory=dict)
+    state_scoring_feature: str = ""
+    state_scoring_rule: str = "+"
+    state_split_feature: str = ""
+    state_split_rule: str = "+"
     run_fit_clicks: int = 0
 
     @property
@@ -219,6 +223,10 @@ class model_cfg:
             emission_cols=list(value.get("emission_cols", [])),
             transition_cols=list(value.get("transition_cols", [])),
             frozen_emissions=serialize_frozen_emissions(value.get("frozen_emissions", {})),
+            state_scoring_feature=str(value.get("state_scoring_feature", "")),
+            state_scoring_rule=str(value.get("state_scoring_rule", "+")),
+            state_split_feature=str(value.get("state_split_feature", "")),
+            state_split_rule=str(value.get("state_split_rule", "+")),
             run_fit_clicks=int(value.get("run_fit_clicks", 0)),
         )
 
@@ -271,6 +279,11 @@ class ModelManagerWidget(anywidget.AnyWidget):
     transition_cols         = traitlets.List(traitlets.Unicode()).tag(sync=True)
     transition_groups       = traitlets.List(traitlets.Dict()).tag(sync=True)
 
+    state_scoring_feature = traitlets.Unicode("").tag(sync=True)
+    state_scoring_rule = traitlets.Unicode("+").tag(sync=True)
+    state_split_feature = traitlets.Unicode("").tag(sync=True)
+    state_split_rule = traitlets.Unicode("+").tag(sync=True)
+
     is_running = traitlets.Bool(False).tag(sync=True)
 
     run_fit_clicks   = traitlets.Int(0).tag(sync=True)
@@ -306,6 +319,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "emission_cols": list(self.emission_cols),
                 "transition_cols": list(self.transition_cols),
                 "frozen_emissions": serialize_frozen_emissions(self.frozen_emissions),
+                "state_scoring_feature": self.state_scoring_feature,
+                "state_scoring_rule": self.state_scoring_rule,
+                "state_split_feature": self.state_split_feature,
+                "state_split_rule": self.state_split_rule,
                 "run_fit_clicks": int(self.run_fit_clicks),
             }
         )
@@ -348,6 +365,9 @@ class ModelManagerWidget(anywidget.AnyWidget):
 
     @traitlets.observe("K", "emission_cols", "frozen_emissions")
     def _on_frozen_inputs_change(self, change):
+        if change["name"] == "emission_cols":
+            self._ensure_state_scoring_defaults()
+
         if self.model_type == "glm":
             if self.frozen_emissions:
                 self.frozen_emissions = {}
@@ -429,6 +449,11 @@ class ModelManagerWidget(anywidget.AnyWidget):
             self.lapse_mode = str(cfg["lapse_mode"])
         if "lapse_max" in cfg:
             self.lapse_max = float(cfg["lapse_max"])
+        self.state_scoring_feature = str(cfg.get("state_scoring_feature", self.state_scoring_feature))
+        self.state_scoring_rule = str(cfg.get("state_scoring_rule", self.state_scoring_rule or "+"))
+        self.state_split_feature = str(cfg.get("state_split_feature", self.state_split_feature))
+        self.state_split_rule = str(cfg.get("state_split_rule", self.state_split_rule or "+"))
+        self._ensure_state_scoring_defaults()
         self.alias = display_name
         self.saved_model_name = display_name
         self.alias_error = ""
@@ -455,6 +480,11 @@ class ModelManagerWidget(anywidget.AnyWidget):
             default_ecols = adapter.default_emission_cols(df_all)
             self.emission_cols_options = available_ecols
             self.emission_cols = list(default_ecols)
+            self.state_scoring_feature = ""
+            self.state_scoring_rule = "+"
+            self.state_split_feature = ""
+            self.state_split_rule = "+"
+            self._ensure_state_scoring_defaults()
             self.transition_cols_options = adapter.available_transition_cols()
             self.transition_cols = adapter.default_transition_cols()
             self.frozen_emissions = {}
@@ -510,6 +540,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
             "cv_mode": cv_mode,
             "cv_repeats": int(self.cv_repeats) if cv_mode != "none" else 0,
             "emission_cols": list(self.emission_cols),
+            "state_scoring_feature": self.state_scoring_feature,
+            "state_scoring_rule": self.state_scoring_rule,
+            "state_split_feature": self.state_split_feature,
+            "state_split_rule": self.state_split_rule,
         }
         if self._supports_condition_filter():
             cfg["condition_filter"] = self.condition_filter
@@ -545,6 +579,14 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if self._supports_condition_filter() and str(saved.get("condition_filter", "all")) != self.condition_filter:
             return False
         if saved.get("emission_cols", []) != list(self.emission_cols):
+            return False
+        if str(saved.get("state_scoring_feature", self.state_scoring_feature)) != self.state_scoring_feature:
+            return False
+        if str(saved.get("state_scoring_rule", self.state_scoring_rule)) != self.state_scoring_rule:
+            return False
+        if str(saved.get("state_split_feature", self.state_split_feature)) != self.state_split_feature:
+            return False
+        if str(saved.get("state_split_rule", self.state_split_rule)) != self.state_split_rule:
             return False
 
         if self.model_type == "glm":
@@ -651,6 +693,42 @@ class ModelManagerWidget(anywidget.AnyWidget):
         self.emission_groups = adapter.build_emission_groups(list(self.emission_cols_options))
         self.transition_groups = adapter.build_transition_groups(list(self.transition_cols_options))
 
+    def _default_state_scoring_feature(self) -> str:
+        cols = [str(col) for col in self.emission_cols]
+        if not cols:
+            return ""
+        preferred = (
+            "stim_x_delay_param",
+            "evidence_param",
+            "stim_param",
+            "stim_vals",
+            "stim",
+            "SL",
+            "SR",
+        )
+        for col in preferred:
+            if col in cols:
+                return col
+        for col in cols:
+            if col != "bias" and not col.startswith("bias_"):
+                return col
+        return cols[0]
+
+    def _ensure_state_scoring_defaults(self) -> None:
+        cols = set(str(col) for col in self.emission_cols)
+        if not cols:
+            self.state_scoring_feature = ""
+            self.state_split_feature = ""
+            return
+        if self.state_scoring_feature not in cols:
+            self.state_scoring_feature = self._default_state_scoring_feature()
+        if self.state_split_feature and self.state_split_feature not in cols:
+            self.state_split_feature = ""
+        if self.state_scoring_rule not in {"+", "-", "abs"}:
+            self.state_scoring_rule = "+"
+        if self.state_split_rule not in {"+", "-", "abs"}:
+            self.state_split_rule = "+"
+
     def _clear_adapter_state(self) -> None:
         self.is_2afc = False
         self.show_condition_filter = False
@@ -661,6 +739,10 @@ class ModelManagerWidget(anywidget.AnyWidget):
         self.emission_cols = []
         self.transition_cols_options = []
         self.transition_cols = []
+        self.state_scoring_feature = ""
+        self.state_scoring_rule = "+"
+        self.state_split_feature = ""
+        self.state_split_rule = "+"
         self.existing_models = []
         self.existing_models_info = []
         self.existing_model = ""

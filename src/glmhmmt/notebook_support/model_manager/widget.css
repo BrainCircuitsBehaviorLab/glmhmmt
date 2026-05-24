@@ -384,6 +384,23 @@
     gap: 8px;
 }
 
+.mm-state-scoring-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 2fr) minmax(90px, 0.7fr) minmax(220px, 2fr) minmax(90px, 0.7fr);
+    gap: 12px;
+    align-items: end;
+}
+
+.mm-sub-label {
+    display: block;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    margin-bottom: 6px;
+}
+
 .mm-pill {
     border: 1px solid #cbd5e1;
     background: #ffffff;
@@ -1268,6 +1285,10 @@
     .mm-input.error {
         border-color: #f87171;
         box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.16);
+    }
+
+    .mm-sub-label {
+        color: #9ca3af;
     }
 
     .mm-num-input {
