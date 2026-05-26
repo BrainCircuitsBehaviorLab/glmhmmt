@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from glmhmmt.plots.utils import require_columns, resolve_state_order, state_palette, to_pandas_df
-from glmhmmt.plots.common import resolve_single_axis
+from glmhmmt.plots.common import resolve_axes_grid, resolve_single_axis
 
 def posterior_probs(
     posterior_df,
@@ -138,7 +138,12 @@ def session_trajectories(
     return ax
 
 
-def session_deepdive(payload: dict) -> plt.Figure:
+def session_deepdive(
+    payload: dict,
+    *,
+    axes: Sequence[plt.Axes] | np.ndarray | plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure:
     trial_df = to_pandas_df(payload.get("trial_df"), name="trial_df")
     posterior_df = to_pandas_df(payload.get("posterior_df"), name="posterior_df")
     require_columns(trial_df, ["trial_in_session"], name="trial_df")
@@ -160,15 +165,17 @@ def session_deepdive(payload: dict) -> plt.Figure:
     trace_cols: Sequence[str] = payload.get("trace_cols", [])
     n_rows = 2 if trace_cols else 1
     height_ratios = [2, 1.5] if trace_cols else [1]
-    fig, axes = plt.subplots(
-        n_rows,
-        1,
-        figsize=payload.get("figsize", (14, 5 + 2.5 * (n_rows - 1))),
+    fig, axes_array, created_fig = resolve_axes_grid(
+        axes=axes,
+        n_panels=n_rows,
+        nrows=n_rows,
+        ncols=1,
+        figsize=figsize or payload.get("figsize", (14, 5 + 2.5 * (n_rows - 1))),
         sharex=True,
         gridspec_kw={"height_ratios": height_ratios},
     )
-    axes = np.atleast_1d(axes)
-    ax = axes[0]
+    axes_array = np.atleast_1d(axes_array).ravel()
+    ax = axes_array[0]
 
     engaged_window = int(payload.get("engaged_window", 20))
     engaged_trace_mode = str(payload.get("engaged_trace_mode", "rolling")).strip().lower()
@@ -273,7 +280,7 @@ def session_deepdive(payload: dict) -> plt.Figure:
         ax.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
 
     if trace_cols:
-        ax2 = axes[1]
+        ax2 = axes_array[1]
         trace_colors = {
             "A_plus": "royalblue",
             "A_minus": "gold",
@@ -298,12 +305,18 @@ def session_deepdive(payload: dict) -> plt.Figure:
     else:
         ax.set_xlabel("Trial within session")
 
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.82)
+    if created_fig:
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.82)
     return fig
 
 
-def session_deepdive_state_traces(payload: dict) -> plt.Figure:
+def session_deepdive_state_traces(
+    payload: dict,
+    *,
+    ax: plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
+) -> plt.Figure:
     """Plot one session's state posterior traces as lines only."""
     trial_df = to_pandas_df(payload.get("trial_df"), name="trial_df")
     posterior_df = to_pandas_df(payload.get("posterior_df"), name="posterior_df")
@@ -325,7 +338,10 @@ def session_deepdive_state_traces(payload: dict) -> plt.Figure:
         .reindex(index=x, columns=states)
     )
 
-    fig, ax = plt.subplots(1, 1, figsize=payload.get("trace_figsize", (14, 3.8)))
+    fig, ax, created_fig = resolve_single_axis(
+        ax=ax,
+        figsize=figsize or payload.get("trace_figsize", (14, 3.8)),
+    )
 
     for state in states:
         ax.plot(
@@ -375,6 +391,7 @@ def session_deepdive_state_traces(payload: dict) -> plt.Figure:
     ax.set_ylabel("State probability")
     ax.set_title(f"{payload.get('title', 'Session deepdive')} - posterior traces", pad=22)
     ax.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.82)
+    if created_fig:
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.82)
     return fig

@@ -116,6 +116,37 @@ def _build_model(
         baseline_class_idx=baseline_class_idx,
     )
 
+
+def _count_free_params(result: dict) -> int:
+    """Count free parameters under the GLMHMM-T parametrization.
+
+    This follows the existing CLI convention of excluding the fitted initial
+    state distribution from BIC, matching ``fit_glmhmm.py``.
+    """
+    K = int(result["K"])
+    num_classes = int(result["num_classes"])
+    x_dim = int(result["X"].shape[1])
+    u_dim = int(result["U"].shape[1])
+
+    transition_params = K * (K - 1)
+    if u_dim > 0:
+        transition_params += (K - 1) * u_dim
+
+    frozen = normalize_frozen_emissions(result.get("frozen_emissions", {}))
+    x_cols = [str(col) for col in result.get("names", {}).get("X_cols", [])]
+    x_col_set = set(x_cols)
+    frozen_feature_count = sum(
+        1
+        for state_idx, feature_map in frozen.items()
+        if 0 <= int(state_idx) < K
+        for feature_name in feature_map
+        if str(feature_name) in x_col_set
+    )
+    emission_params = K * (num_classes - 1) * x_dim
+    emission_params -= frozen_feature_count * (num_classes - 1)
+    return int(transition_params + emission_params)
+
+
 def fit_subject(
     subject: str,
     K: int,
@@ -431,8 +462,7 @@ def save_results(result: dict, out_dir: Path) -> None:
     acc = float(np.mean(np.argmax(p_pred, axis=1) == result["y"]))
     raw_ll = float(result["raw_ll"])
     ll_per_trial = raw_ll / T
-    num_classes = result["num_classes"]
-    n_params = result["K"] * (result["K"] - 1) * (1 + result["U"].shape[1]) + result["K"] * (num_classes - 1) * result["X"].shape[1]
+    n_params = _count_free_params(result)
     bic = -2 * raw_ll + n_params * np.log(T)
 
     pl.DataFrame(
@@ -489,8 +519,7 @@ def save_cv_results(result: dict, out_dir: Path) -> None:
     raw_ll = float(result["raw_ll"])
     ll_per_trial = raw_ll / T
     acc = float(np.mean(np.argmax(p_pred, axis=1) == result["y"]))
-    num_classes = result["num_classes"]
-    n_params = result["K"] * (result["K"] - 1) * (1 + result["U"].shape[1]) + result["K"] * (num_classes - 1) * result["X"].shape[1]
+    n_params = _count_free_params(result)
     bic = -2 * raw_ll + n_params * np.log(T)
     pl.DataFrame(
         {

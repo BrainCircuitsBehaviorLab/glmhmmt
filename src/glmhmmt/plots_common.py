@@ -1630,6 +1630,8 @@ def plot_session_deepdive(
     choice_labels: dict[int, str] | None = None,
     engaged_window: int = 20,
     engaged_trace_mode: str = "rolling",
+    axes: Sequence[plt.Axes] | np.ndarray | plt.Axes | None = None,
+    figsize: tuple[float, float] | None = None,
 ) -> plt.Figure:
     try:
         sess = int(sess)
@@ -1718,14 +1720,25 @@ def plot_session_deepdive(
 
     n_rows = 2 if trace_sources else 1
     height_ratios = [2, 1.5] if trace_sources else [1]
-    fig, axes = plt.subplots(
-        n_rows,
-        1,
-        figsize=(14, 5 + 2.5 * (n_rows - 1)),
-        sharex=True,
-        gridspec_kw={"height_ratios": height_ratios},
-    )
-    axes = np.atleast_1d(axes)
+    created_fig = axes is None
+    if created_fig:
+        fig, axes_obj = plt.subplots(
+            n_rows,
+            1,
+            figsize=figsize or (14, 5 + 2.5 * (n_rows - 1)),
+            sharex=True,
+            gridspec_kw={"height_ratios": height_ratios},
+        )
+        axes = np.atleast_1d(axes_obj)
+    else:
+        axes = (
+            np.asarray([axes], dtype=object)
+            if isinstance(axes, plt.Axes)
+            else np.asarray(axes, dtype=object).ravel()
+        )
+        if len(axes) < n_rows:
+            raise ValueError(f"Expected at least {n_rows} axes, got {len(axes)}.")
+        fig = axes[0].figure
     ax1 = axes[0]
 
     bottom = np.zeros(T)
@@ -1815,7 +1828,8 @@ def plot_session_deepdive(
     else:
         ax1.set_xlabel("Trial within session")
 
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.82)
+    if created_fig:
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.82)
     sns.despine(fig=fig, right=False)
     return fig

@@ -30,7 +30,7 @@ def resolve_single_axis(
 
 def resolve_axes_grid(
     *,
-    axes: Sequence[plt.Axes] | np.ndarray | None = None,
+    axes: Sequence[plt.Axes] | np.ndarray | plt.Axes | None = None,
     n_panels: int,
     nrows: int,
     ncols: int,
@@ -71,7 +71,11 @@ def resolve_axes_grid(
         )
         flat_axes = np.asarray(axes_obj, dtype=object).ravel()
     else:
-        flat_axes = np.asarray(axes, dtype=object).ravel()
+        flat_axes = (
+            np.asarray([axes], dtype=object)
+            if isinstance(axes, plt.Axes)
+            else np.asarray(axes, dtype=object).ravel()
+        )
         if len(flat_axes) < n_panels:
             raise ValueError(f"Expected at least {n_panels} axes, got {len(flat_axes)}.")
         fig = flat_axes[0].figure
