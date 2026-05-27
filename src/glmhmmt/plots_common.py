@@ -1808,7 +1808,8 @@ def plot_session_deepdive(
 
     lines1, labs1 = ax1.get_legend_handles_labels()
     lines1r, labs1r = ax1r.get_legend_handles_labels()
-    ax1.legend(lines1 + lines1r, labs1 + labs1r, bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+    legend_handles = lines1 + lines1r
+    legend_labels = labs1 + labs1r
 
     trace_colors = {
         "A_plus": "royalblue",
@@ -1824,12 +1825,28 @@ def plot_session_deepdive(
         ax2.set_ylabel("Action trace")
         ax2.set_ylim(0, None)
         ax2.set_xlabel("Trial within session")
-        ax2.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+        trace_handles, trace_labels = ax2.get_legend_handles_labels()
+        legend_handles += trace_handles
+        legend_labels += trace_labels
     else:
         ax1.set_xlabel("Trial within session")
 
+    unique_legend = dict(zip(legend_labels, legend_handles, strict=False))
+    legend_axis = axes[n_rows - 1]
+    legend_axis.legend(
+        unique_legend.values(),
+        unique_legend.keys(),
+        bbox_to_anchor=(0.5, -0.28),
+        loc="upper center",
+        ncol=max(1, len(unique_legend)),
+        fontsize=8,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=1.6,
+    )
+
     if created_fig:
         fig.tight_layout()
-        fig.subplots_adjust(right=0.82)
+        fig.subplots_adjust(bottom=0.2 if n_rows == 1 else 0.15)
     sns.despine(fig=fig, right=False)
     return fig

@@ -275,9 +275,10 @@ def session_deepdive(
         axr.set_ylabel("Accuracy (%)", color="black")
         lines, labels = ax.get_legend_handles_labels()
         lines_r, labels_r = axr.get_legend_handles_labels()
-        ax.legend(lines + lines_r, labels + labels_r, bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+        legend_handles = lines + lines_r
+        legend_labels = labels + labels_r
     else:
-        ax.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
 
     if trace_cols:
         ax2 = axes_array[1]
@@ -301,13 +302,29 @@ def session_deepdive(
         ax2.set_ylabel("Action trace")
         ax2.set_ylim(0, None)
         ax2.set_xlabel("Trial within session")
-        ax2.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+        trace_handles, trace_labels = ax2.get_legend_handles_labels()
+        legend_handles += trace_handles
+        legend_labels += trace_labels
     else:
         ax.set_xlabel("Trial within session")
 
+    unique_legend = dict(zip(legend_labels, legend_handles, strict=False))
+    legend_axis = axes_array[n_rows - 1]
+    legend_axis.legend(
+        unique_legend.values(),
+        unique_legend.keys(),
+        bbox_to_anchor=(0.5, -0.28),
+        loc="upper center",
+        ncol=max(1, len(unique_legend)),
+        fontsize=8,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=1.6,
+    )
+
     if created_fig:
         fig.tight_layout()
-        fig.subplots_adjust(right=0.82)
+        fig.subplots_adjust(bottom=0.2 if n_rows == 1 else 0.15)
     return fig
 
 
@@ -390,8 +407,20 @@ def session_deepdive_state_traces(
     ax.set_xlabel("Trial within session")
     ax.set_ylabel("State probability")
     ax.set_title(f"{payload.get('title', 'Session deepdive')} - posterior traces", pad=22)
-    ax.legend(bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=8, frameon=False)
+    handles, labels = ax.get_legend_handles_labels()
+    unique_legend = dict(zip(labels, handles, strict=False))
+    ax.legend(
+        unique_legend.values(),
+        unique_legend.keys(),
+        bbox_to_anchor=(0.5, -0.22),
+        loc="upper center",
+        ncol=max(1, len(unique_legend)),
+        fontsize=8,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=1.6,
+    )
     if created_fig:
         fig.tight_layout()
-        fig.subplots_adjust(right=0.82)
+        fig.subplots_adjust(bottom=0.22)
     return fig
