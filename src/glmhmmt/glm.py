@@ -324,6 +324,71 @@ def glm_probs_from_weights(
     return softmax(X_np @ W.T, axis=1)
 
 
+def predict_glm_probs(
+    X: ArrayLike,
+    weights: ArrayLike,
+    *,
+    y: ArrayLike | None = None,
+    baseline_class_idx: int = 0,
+    num_classes: int | None = None,
+    lapse_mode: str | None = "none",
+    lapse_rates: ArrayLike | None = None,
+) -> np.ndarray:
+    """Predict probabilities from fitted GLM parameters on a new design matrix."""
+    base_probs = glm_probs_from_weights(
+        X,
+        weights,
+        baseline_class_idx=baseline_class_idx,
+        num_classes=num_classes,
+    )
+    T, C = base_probs.shape
+    normalized_lapse_mode = _normalize_lapse_mode(lapse_mode, None)
+    expected_lapse_size = _num_lapse_params(C, normalized_lapse_mode)
+    if lapse_rates is None:
+        lapse_rates_np = np.zeros(expected_lapse_size, dtype=float)
+    else:
+        lapse_rates_np = np.asarray(lapse_rates, dtype=float).reshape(-1)
+        if normalized_lapse_mode != "none" and lapse_rates_np.size != expected_lapse_size:
+            raise ValueError(
+                f"lapse_rates has size {lapse_rates_np.size}, expected {expected_lapse_size} "
+                f"for lapse_mode={normalized_lapse_mode!r} and num_classes={C}."
+            )
+
+    if y is None:
+        y_np = np.zeros(T, dtype=int)
+    else:
+        y_np = np.asarray(y, dtype=int).reshape(-1)
+        if y_np.shape[0] != T:
+            raise ValueError(f"y has length {y_np.shape[0]} but X has {T} rows.")
+        if y_np.size and (y_np.min() < 0 or y_np.max() >= C):
+            raise ValueError(f"y contains class indices outside [0, {C - 1}].")
+
+    repeat_targets = None
+    alternate_targets = None
+    prev_choices = None
+    if normalized_lapse_mode in {"history", "history_conditioned"}:
+        if y is None:
+            raise ValueError(f"y is required when lapse_mode={normalized_lapse_mode!r}.")
+        repeat_targets = _history_repeat_targets(y_np, C)
+        alternate_targets = _history_alternate_targets(y_np, C)
+        prev_choices = y_np[:-1]
+
+    probs = _apply_lapse_mode(
+        base_probs,
+        y_np,
+        C,
+        normalized_lapse_mode,
+        lapse_rates_np,
+        repeat_targets=repeat_targets,
+        alternate_targets=alternate_targets,
+        prev_choices=prev_choices,
+    )
+    if T > 0:
+        probs = np.clip(probs, 1e-10, 1.0)
+        probs /= probs.sum(axis=1, keepdims=True)
+    return probs
+
+
 def simulate_glm_choices(
     X: ArrayLike,
     weights: ArrayLike,

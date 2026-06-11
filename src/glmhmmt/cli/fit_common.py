@@ -7,8 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 import polars as pl
 
-from glmhmmt.model import serialize_frozen_emissions
-
 FIT_ROW_ID_COL = "_fit_row_id"
 CV_SESSION_ID_COL = "_cv_session_id"
 
@@ -51,6 +49,8 @@ def stable_model_id(
     cv_repeats: int = 0,
 ) -> str:
     """Stable 8-char MD5 hash over the fit-defining model configuration."""
+    from glmhmmt.model import serialize_frozen_emissions
+
     cv_mode = normalize_cv_mode(cv_mode)
     cv_repeats = int(cv_repeats) if cv_mode != "none" else 0
     config = {

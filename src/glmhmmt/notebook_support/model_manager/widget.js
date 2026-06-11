@@ -583,7 +583,7 @@ function render({ model, el }) {
         `;
       }
 
-      if (modelType !== "glm" && is2afc) {
+      if (is2afc) {
         html += `
           <div class="mm-flex-row">
             <div class="mm-col half-col">
