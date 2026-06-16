@@ -71,13 +71,13 @@ def _filter_condition_df(df: pl.DataFrame, task: str, condition_filter: str | No
     return adapter.filter_condition_df(df, selected)
 
 
-def _load_subject_feature_df(subject: str, task: str, tau: float, condition_filter: str = "all") -> tuple[Any, pl.DataFrame]:
+def _load_subject_feature_df(subject: str, task: str, tau: float, condition_filter: str = "all", emission_cols: list[str] | None = None) -> tuple[Any, pl.DataFrame]:
     adapter = get_adapter(task)
     df = adapter.read_dataset()
     df = adapter.subject_filter(df)
     df = _filter_condition_df(df, task, condition_filter)
     df_sub = df.filter(pl.col("subject") == subject).sort(adapter.sort_col)
-    feature_df = adapter.build_feature_df(df_sub, tau=tau)
+    feature_df = adapter.build_feature_df(df_sub, tau=tau, emission_cols=emission_cols)
     return adapter, feature_df
 
 
