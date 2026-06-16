@@ -164,7 +164,7 @@ def fit_subject(
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
 ) -> dict:
-    adapter, feature_df = _load_subject_feature_df(subject, task, tau)
+    adapter, feature_df = _load_subject_feature_df(subject, task, tau, emission_cols=emission_cols, transition_cols=transition_cols)
     y, X, U, session_ids, names = _prepare_arrays(
         adapter,
         feature_df,
@@ -260,7 +260,7 @@ def fit_subject_cv(
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
 ) -> dict:
-    adapter, feature_df = _load_subject_feature_df(subject, task, tau)
+    adapter, feature_df = _load_subject_feature_df(subject, task, tau, emission_cols=emission_cols, transition_cols=transition_cols)
     frozen = normalize_frozen_emissions(frozen_emissions)
     repeats: list[dict[str, Any]] = []
     best_repeat_idx = -1

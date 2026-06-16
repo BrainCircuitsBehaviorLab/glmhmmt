@@ -140,7 +140,7 @@ def fit_subject(
     baseline_class_idx: int = 0,
 ) -> dict:
     """Fit a GLMHMM to a single subject's data, returning the best-fitting params and other info."""
-    adapter, feature_df = _load_subject_feature_df(subject, task, tau, condition_filter=condition_filter)
+    adapter, feature_df = _load_subject_feature_df(subject, task, tau, condition_filter=condition_filter, emission_cols=emission_cols)
     y, X, session_ids, names = _prepare_arrays(adapter, feature_df, emission_cols, adapter.session_col)
     num_classes = adapter.num_classes
     frozen = normalize_frozen_emissions(frozen_emissions)
@@ -220,7 +220,7 @@ def fit_subject_cv(
     condition_filter: str = "all",
     baseline_class_idx: int = 0,
 ) -> dict:
-    adapter, feature_df = _load_subject_feature_df(subject, task, tau, condition_filter=condition_filter)
+    adapter, feature_df = _load_subject_feature_df(subject, task, tau, condition_filter=condition_filter, emission_cols=emission_cols)
     frozen = normalize_frozen_emissions(frozen_emissions)
     repeats: list[dict[str, Any]] = []
     best_repeat_idx = -1
