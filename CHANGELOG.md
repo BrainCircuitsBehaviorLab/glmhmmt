@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.10
+- Added emission and transition calls to the load feature df in fit functions.
+
 ## 0.3.9
 - Added glm cv.
 
