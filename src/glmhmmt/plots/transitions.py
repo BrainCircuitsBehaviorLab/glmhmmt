@@ -23,6 +23,19 @@ from glmhmmt.plots.common import (
 from glmhmmt.views import get_state_color
 
 
+def _is_directed_transition_weights_df(weights_df) -> bool:
+    columns = getattr(weights_df, "columns", ())
+    if "transition_kind" not in columns:
+        return False
+    if hasattr(weights_df, "get_column"):
+        return "directed_edge" in set(weights_df.get_column("transition_kind").to_list())
+    return "directed_edge" in set(weights_df["transition_kind"].astype(str).tolist())
+
+
+def _plot_k_for_transition_weights(weights_df, K: int | None) -> int | None:
+    return None if _is_directed_transition_weights_df(weights_df) else K
+
+
 def _add_binary_zero_ttest_labels(
     ax: plt.Axes,
     df,
@@ -87,6 +100,17 @@ def _binary_engaged_weights_df(
     feature_labeler: Callable[[str], str] | None = None,
 ):
     """Return prepared binary weights filtered to the engaged target state."""
+    if _is_directed_transition_weights_df(weights_df):
+        df, features, display_features, state_order, _ = _prepare_weights_df(
+            weights_df,
+            K=None,
+            state_label_order=state_label_order,
+            feature_order=feature_order,
+            abs_features=abs_features,
+            feature_labeler=feature_labeler,
+        )
+        return df, features, display_features, state_order, None
+
     df, features, display_features, state_order, _ = _prepare_weights_df(
         weights_df,
         K=K,
@@ -206,7 +230,7 @@ def transition_weights_by_subject(
     """Plot subject-wise transition weights with the emission-weight style."""
     fig, axes_grid = emission_weights_by_subject(
         weights_df,
-        K=K,
+        K=_plot_k_for_transition_weights(weights_df, K),
         state_label_order=state_label_order,
         feature_order=feature_order,
         abs_features=abs_features,
@@ -284,7 +308,7 @@ def transition_weights_summary_lineplot(
 
     ax = emission_weights_summary_lineplot(
         weights_df,
-        K=K,
+        K=_plot_k_for_transition_weights(weights_df, K),
         state_label_order=state_label_order,
         feature_order=feature_order,
         abs_features=abs_features,
@@ -340,7 +364,7 @@ def transition_weights_summary_boxplot(
 
     ax = emission_weights_summary_boxplot(
         weights_df,
-        K=K,
+        K=_plot_k_for_transition_weights(weights_df, K),
         state_label_order=state_label_order,
         feature_order=feature_order,
         abs_features=abs_features,

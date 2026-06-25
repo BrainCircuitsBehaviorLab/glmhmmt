@@ -416,7 +416,7 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
 
 class ParamsInputDrivenTransitions(NamedTuple):
     bias: Union[Float[Array, "num_states num_states"], ParameterProperties]
-    weights: Union[Float[Array, "num_states_minus1 input_dim"], ParameterProperties]
+    weights: Union[Float[Array, "num_states num_states input_dim"], ParameterProperties]
 
 
 class InputDrivenSoftmaxTransitions(HMMTransitions):
@@ -436,47 +436,28 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         self.transition_input_dim = transition_input_dim
         self.weight_scale = weight_scale
         self.stickiness = stickiness
-        self.baseline_target_idx = num_states - 1
 
     def _normalize_bias(self, bias):
         """Store baseline transition logits in row-normalized gauge."""
         return jax.nn.log_softmax(bias, axis=-1)
 
-    def _weights_with_baseline(self, weights):
-        """Append the implicit zero input-weight vector for the baseline target."""
-        zero = jnp.zeros((1, weights.shape[-1]), dtype=weights.dtype)
-        return jnp.concatenate(
-            [
-                weights[: self.baseline_target_idx],
-                zero,
-                weights[self.baseline_target_idx :],
-            ],
-            axis=0,
-        )
-
     def _coerce_weights(self, weights, dtype=jnp.float32):
-        """Accept new K-1 weights and common full-weight warm-start formats."""
+        """Accept directed-edge weights and target-weight warm-start formats."""
         W = jnp.asarray(weights, dtype)
         K = self.num_states
+        D = self.transition_input_dim
+        if W.ndim == 3 and W.shape == (K, K, D):
+            return W
         if W.ndim == 2:
-            if W.shape[0] == K - 1:
-                return W
-            if W.shape[0] == K:
-                baseline = W[self.baseline_target_idx : self.baseline_target_idx + 1]
-                contrasts = W - baseline
-                return jnp.concatenate(
-                    [
-                        contrasts[: self.baseline_target_idx],
-                        contrasts[self.baseline_target_idx + 1 :],
-                    ],
-                    axis=0,
-                )
-        if W.ndim == 3 and W.shape[1] == K:
-            # Backward-compatible conversion from the old source-target tensor.
-            return self._coerce_weights(W.mean(axis=0), dtype=dtype)
+            if W.shape == (K, D):
+                return jnp.broadcast_to(W[None, :, :], (K, K, D))
+            if W.shape == (K - 1, D):
+                zero = jnp.zeros((1, D), dtype=W.dtype)
+                target_weights = jnp.concatenate([W, zero], axis=0)
+                return jnp.broadcast_to(target_weights[None, :, :], (K, K, D))
         raise ValueError(
-            "transition weights must have shape (K-1, D), (K, D), or legacy "
-            f"(K, K, D); got {tuple(W.shape)} for K={K}."
+            "transition weights must have shape (K, K, D), or old target-weight "
+            f"shape (K, D) or (K-1, D); got {tuple(W.shape)} for K={K}, D={D}."
         )
 
     def initialize(self, key: Optional[Array] = None, method: str = "prior", bias=None, weights=None):
@@ -493,7 +474,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             b = jnp.asarray(bias, jnp.float32)
         b = self._normalize_bias(b)
         W = (
-            self.weight_scale * jr.normal(key2, (K - 1, D), dtype=jnp.float32)
+            self.weight_scale * jr.normal(key2, (K, K, D), dtype=jnp.float32)
             if weights is None
             else self._coerce_weights(weights, jnp.float32)
         )
@@ -510,8 +491,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
     def distribution(self, params, state, inputs=None):
         u = inputs[self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]
         i = jnp.asarray(state, jnp.int32)
-        input_logits = self._weights_with_baseline(params.weights) @ u
-        logits = params.bias[i] + input_logits
+        logits = params.bias[i] + jnp.einsum("jd,d->j", params.weights[i], u)
         return tfd.Categorical(logits=logits)
 
     def _compute_transition_matrices(self, params, inputs):
@@ -524,8 +504,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
 
         # u_{t+1} is used for transition t -> t+1, matching Dynamax.
         u = inputs[1:, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (T-1, D)
-        input_logits = u @ self._weights_with_baseline(params.weights).T  # (T-1,K)
-        logits = params.bias[None, :, :] + input_logits[:, None, :]  # (T-1,K,K)
+        logits = params.bias[None, :, :] + jnp.einsum("ijd,td->tij", params.weights, u)  # (T-1,K,K)
         return jax.nn.softmax(logits, axis=-1)
 
     def collect_suff_stats(self, params, posterior, inputs=None):
@@ -553,9 +532,8 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         clip_val = 20.0
 
         def loss_fn(b, W):
-            # logits[n,i,j] = b[i,j] + sum_d W_with_baseline[j,d] u[n,d]
-            input_logits = u @ self._weights_with_baseline(W).T  # (N,K)
-            logits = b[None, :, :] + input_logits[:, None, :]  # (N,K,K)
+            # logits[n,i,j] = b[i,j] + sum_d W[i,j,d] u[n,d]
+            logits = b[None, :, :] + jnp.einsum("ijd,nd->nij", W, u)  # (N,K,K)
             logp = jax.nn.log_softmax(logits, axis=-1)  # (N,K,K)
             nll = -(xi * logp).sum()
             reg = l2 * (jnp.sum(b * b) + jnp.sum(W * W))

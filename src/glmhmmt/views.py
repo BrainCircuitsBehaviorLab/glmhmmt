@@ -202,15 +202,15 @@ class SubjectFitView:
     transition_bias :
         Input-driven transition bias shape ``(K, K)`` — GLM-HMM-t only.
     transition_weights :
-        Input-driven transition weights, shape ``(K - 1, D)`` for new
-        SSM-style alternative-formulation fits, or legacy ``(K, K, D)``.
+        Input-driven directed-edge transition weights, shape ``(K, K, D)``.
+        Older target-only fits may store ``(K, D)`` or ``(K - 1, D)``.
     U :
         Transition design matrix, shape ``(T, D)`` — GLM-HMM-t only.
     U_cols :
         Transition feature names, length ``D``.
     transition_weight_baseline_idx :
-        Target state whose transition-input coefficient vector is implicit zero
-        in alternative-formulation GLM-HMM-T fits.
+        Deprecated metadata for older alternative-formulation GLM-HMM-T fits.
+        Directed-edge fits save ``-1`` because no target baseline is implicit.
     baseline_class_idx :
         Choice class used as the implicit softmax reference. The stored
         ``emission_weights`` rows are aligned to class-index order with this
@@ -237,7 +237,7 @@ class SubjectFitView:
     initial_probs: Optional[np.ndarray] = None  # (K,)
     transition_matrix: Optional[np.ndarray] = None  # (K, K) or (T-1, K, K)
     transition_bias: Optional[np.ndarray] = None  # (K, K)
-    transition_weights: Optional[np.ndarray] = None  # (K - 1, D) or legacy (K, K, D)
+    transition_weights: Optional[np.ndarray] = None  # (K, K, D), with old target-only fits as (K, D) or (K - 1, D)
     U: Optional[np.ndarray] = None  # (T, D)
     U_cols: list[str] = field(default_factory=list)
     transition_weight_baseline_idx: Optional[int] = None
@@ -432,7 +432,7 @@ def build_views(
             transition_weight_baseline_idx=(
                 int(np.asarray(d["transition_weight_baseline_idx"]).reshape(()))
                 if "transition_weight_baseline_idx" in d
-                else (K - 1 if transition_weights is not None and transition_weights.ndim == 2 else None)
+                else (-1 if transition_weights is not None and transition_weights.ndim == 3 else None)
             ),
             baseline_class_idx=baseline_class_idx,
             emission_model=emission_model,

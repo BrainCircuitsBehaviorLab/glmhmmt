@@ -14,7 +14,14 @@ from glmhmmt.plots.transitions import (
     transition_weights_summary_boxplot,
 )
 from glmhmmt.postprocess import build_transition_weights_df
-from glmhmmt.views import SubjectFitView
+from glmhmmt.views import SubjectFitView, build_views
+
+
+class _DummyAdapter:
+    def label_states(self, arrays_store, names, K, subjects):
+        labels = {subject: {0: "Disengaged", 1: "Engaged"} for subject in subjects}
+        order = {subject: [0, 1] for subject in subjects}
+        return labels, order
 
 
 def _view(subject: str, offset: float = 0.0) -> SubjectFitView:
@@ -42,7 +49,7 @@ def _view(subject: str, offset: float = 0.0) -> SubjectFitView:
     )
 
 
-def test_build_transition_weights_df_matches_legacy_standardization():
+def test_build_transition_weights_df_preserves_directed_edges():
     weights_df = build_transition_weights_df({"s1": _view("s1")})
 
     assert weights_df.columns == [
@@ -50,16 +57,28 @@ def test_build_transition_weights_df_matches_legacy_standardization():
         "state_idx",
         "state_label",
         "state_rank",
+        "source_state_idx",
+        "target_state_idx",
+        "source_state_label",
+        "target_state_label",
+        "transition_label",
+        "transition_kind",
         "feature",
         "feature_idx",
         "weight",
     ]
 
-    rows = weights_df.sort(["state_idx", "feature_idx"]).to_dicts()
-    assert [row["feature"] for row in rows] == ["A_plus", "A_minus", "A_plus", "A_minus"]
+    rows = weights_df.sort(["source_state_idx", "target_state_idx", "feature_idx"]).to_dicts()
+    assert [row["transition_label"] for row in rows[::2]] == [
+        "Disengaged -> Disengaged",
+        "Disengaged -> Engaged",
+        "Engaged -> Disengaged",
+        "Engaged -> Engaged",
+    ]
+    assert [row["feature"] for row in rows[:4]] == ["A_plus", "A_minus", "A_plus", "A_minus"]
     assert np.allclose(
         [row["weight"] for row in rows],
-        [1.0 / 3.0, 2.0 / 3.0, 7.0 / 3.0, 8.0 / 3.0],
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
     )
 
 
@@ -70,10 +89,11 @@ def test_build_transition_weights_df_expands_alternative_formulation_weights():
     rows = build_transition_weights_df({"s1": view}).sort(["state_idx", "feature_idx"]).to_dicts()
 
     assert [row["feature"] for row in rows] == ["A_plus", "A_minus", "A_plus", "A_minus"]
+    assert [row["transition_kind"] for row in rows] == ["target_state"] * 4
     assert np.allclose([row["weight"] for row in rows], [1.0, 2.0, -1.0, -2.0])
 
 
-def test_input_driven_transitions_use_destination_inputs_and_k_minus_one_weights():
+def test_input_driven_transitions_use_destination_inputs_and_directed_edge_weights():
     transitions = InputDrivenSoftmaxTransitions(
         num_states=2,
         emission_input_dim=1,
@@ -82,7 +102,13 @@ def test_input_driven_transitions_use_destination_inputs_and_k_minus_one_weights
     )
     params = ParamsInputDrivenTransitions(
         bias=jnp.zeros((2, 2), dtype=jnp.float32),
-        weights=jnp.asarray([[2.0]], dtype=jnp.float32),
+        weights=jnp.asarray(
+            [
+                [[0.0], [2.0]],
+                [[0.0], [0.0]],
+            ],
+            dtype=jnp.float32,
+        ),
     )
     inputs = jnp.asarray(
         [
@@ -105,13 +131,51 @@ def test_input_driven_transitions_use_destination_inputs_and_k_minus_one_weights
         matrices[:, 0, :],
         np.asarray(
             [
-                [np.exp(1.0) / (np.exp(1.0) + 1.0), 1.0 / (np.exp(1.0) + 1.0)],
-                [np.exp(-2.0) / (np.exp(-2.0) + 1.0), 1.0 / (np.exp(-2.0) + 1.0)],
+                [1.0 / (1.0 + np.exp(1.0)), np.exp(1.0) / (1.0 + np.exp(1.0))],
+                [1.0 / (1.0 + np.exp(-2.0)), np.exp(-2.0) / (1.0 + np.exp(-2.0))],
             ]
         ),
         rtol=1e-6,
     )
-    assert params.weights.shape == (1, 1)
+    np.testing.assert_allclose(matrices[:, 1, :], 0.5)
+    assert params.weights.shape == (2, 2, 1)
+
+
+def test_input_driven_transitions_coerce_old_target_weights_to_edges():
+    transitions = InputDrivenSoftmaxTransitions(
+        num_states=2,
+        emission_input_dim=1,
+        transition_input_dim=1,
+        stickiness=0.0,
+    )
+
+    params, _ = transitions.initialize(weights=jnp.asarray([[2.0]], dtype=jnp.float32))
+
+    assert params.weights.shape == (2, 2, 1)
+    np.testing.assert_allclose(
+        np.asarray(params.weights[:, :, 0]),
+        np.asarray([[2.0, 0.0], [2.0, 0.0]]),
+    )
+
+
+def test_build_views_keeps_directed_transition_weight_shape():
+    transition_weights = np.arange(8, dtype=float).reshape(2, 2, 2)
+    arrays = {
+        "smoothed_probs": np.ones((2, 2), dtype=float) / 2,
+        "predictive_state_probs": np.ones((2, 2), dtype=float) / 2,
+        "emission_weights": np.zeros((2, 1, 1), dtype=float),
+        "X": np.ones((2, 1), dtype=float),
+        "y": np.asarray([0, 1], dtype=int),
+        "X_cols": np.asarray(["x"], dtype=object),
+        "U_cols": np.asarray(["A_plus", "A_minus"], dtype=object),
+        "transition_weights": transition_weights,
+    }
+
+    view = build_views({"s1": arrays}, _DummyAdapter(), K=2, subjects=["s1"])["s1"]
+
+    assert view.transition_weights.shape == (2, 2, 2)
+    assert view.transition_weight_baseline_idx == -1
+    np.testing.assert_allclose(view.transition_weights, transition_weights)
 
 
 def test_transition_weight_plots_use_emission_style_dataframe():
@@ -126,7 +190,12 @@ def test_transition_weight_plots_use_emission_style_dataframe():
     assert axes.ravel()[0].get_ylabel() == "Transition weight"
     assert ax_summary.get_ylabel() == "Transition weight"
     assert [tick.get_text() for tick in ax_summary.get_xticklabels()] == ["A_plus", "A_minus"]
-    assert [text.get_text() for text in ax_summary.get_legend().get_texts()] == ["Engaged"]
+    assert [text.get_text() for text in ax_summary.get_legend().get_texts()] == [
+        "Engaged -> Engaged",
+        "Engaged -> Disengaged",
+        "Disengaged -> Engaged",
+        "Disengaged -> Disengaged",
+    ]
 
     fig_subjects.clf()
     ax_summary.figure.clf()

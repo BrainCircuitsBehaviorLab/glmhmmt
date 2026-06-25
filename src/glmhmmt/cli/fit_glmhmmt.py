@@ -130,7 +130,7 @@ def _count_free_params(result: dict) -> int:
 
     transition_params = K * (K - 1)
     if u_dim > 0:
-        transition_params += (K - 1) * u_dim
+        transition_params += K * K * u_dim
 
     frozen = normalize_frozen_emissions(result.get("frozen_emissions", {}))
     x_cols = [str(col) for col in result.get("names", {}).get("X_cols", [])]
@@ -234,9 +234,7 @@ def fit_subject(
         "U": np.asarray(U),
         "frozen_emissions": serialize_frozen_emissions(frozen),
         "baseline_class_idx": int(baseline_class_idx),
-        "transition_weight_baseline_idx": (
-            int(model.transition_component.baseline_target_idx) if U.shape[1] > 0 else -1
-        ),
+        "transition_weight_baseline_idx": -1,
         "cv_mode": "none",
         "cv_repeats": 0,
     }
@@ -441,11 +439,7 @@ def fit_subject_cv(
         "U": np.asarray(U_full),
         "frozen_emissions": serialize_frozen_emissions(frozen),
         "baseline_class_idx": int(baseline_class_idx),
-        "transition_weight_baseline_idx": (
-            int(best_repeat_model.transition_component.baseline_target_idx)
-            if U_full.shape[1] > 0
-            else -1
-        ),
+        "transition_weight_baseline_idx": -1,
         "cv_mode": "balanced_session_holdout",
         "cv_repeats": n_folds,
     }

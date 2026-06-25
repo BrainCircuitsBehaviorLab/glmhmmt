@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.12
+- Restored directed-edge input-driven transition weights for GLM-HMM-T fits.
+
 ## 0.3.10 - 0.3.11
 - Added emission and transition calls to the load feature df in fit functions.
 

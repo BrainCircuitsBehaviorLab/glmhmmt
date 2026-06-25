@@ -402,36 +402,23 @@ def _transition_feature_names(feature_names, D: int) -> list[str]:
     return names + [f"u{idx}" for idx in range(len(names), D)]
 
 
-def _standardize_transition_weights(weights: np.ndarray) -> np.ndarray:
-    """Convert GLM-HMM-T transition weights to one row per target state.
-
-    New fits store the SSM-style alternative formulation: ``K-1`` target-state
-    coefficient vectors plus an implicit zero vector for the reference target.
-    Legacy fits stored one coefficient vector per source-target state pair; for
-    those arrays we average over source states first. In both cases, plots show
-    all target states centered against the implicit zero baseline.
-    """
+def _standardize_target_transition_weights(weights: np.ndarray) -> np.ndarray:
+    """Convert old target-state transition weights to plottable target rows."""
     weights = np.asarray(weights, dtype=float)
     if weights.ndim == 2:
         weights_full = np.vstack([weights, np.zeros((1, weights.shape[1]), dtype=float)])
         return weights_full - weights_full.mean(axis=0, keepdims=True)
-    elif weights.ndim == 3:
-        weights_avg = weights.mean(axis=0)
-    else:
-        raise ValueError(f"transition_weights must be 2D or 3D, got ndim={weights.ndim}.")
-    baseline = -np.mean(
-        np.vstack([weights_avg, np.zeros((1, weights_avg.shape[1]), dtype=float)]),
-        axis=0,
-    )
-    return weights_avg + baseline
+    raise ValueError(f"target transition_weights must be 2D, got ndim={weights.ndim}.")
 
 
 def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFrame:
-    """Long-format Polars DataFrame of standardized transition weights.
+    """Long-format Polars DataFrame of transition input weights.
 
     Columns
     -------
-    subject, state_idx, state_label, state_rank, feature, feature_idx, weight
+    subject, source/target state metadata, transition_label, feature, weight.
+    ``state_idx``/``state_label`` aliases are retained for the generic weight
+    plotting helpers; for directed-edge fits they identify the transition edge.
     """
     records: list[dict] = []
     for subj, view in views.items():
@@ -439,7 +426,48 @@ def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFram
         if transition_weights is None:
             continue
 
-        weights_std = _standardize_transition_weights(transition_weights)
+        weights = np.asarray(transition_weights, dtype=float)
+        K = int(view.K)
+        if weights.ndim == 3:
+            if weights.shape[0] != K or weights.shape[1] != K:
+                raise ValueError(
+                    f"directed transition_weights for subject {subj!r} must have shape (K, K, D); "
+                    f"got {tuple(weights.shape)} for K={K}."
+                )
+            feature_names = _transition_feature_names(
+                getattr(view, "U_cols", []),
+                int(weights.shape[2]),
+            )
+            for source_idx in range(K):
+                source_label = view.state_name_by_idx.get(source_idx, f"State {source_idx}")
+                source_rank = view.state_rank_by_idx.get(source_idx, source_idx)
+                for target_idx in range(K):
+                    target_label = view.state_name_by_idx.get(target_idx, f"State {target_idx}")
+                    target_rank = view.state_rank_by_idx.get(target_idx, target_idx)
+                    edge_idx = source_idx * K + target_idx
+                    edge_rank = int(source_rank) * K + int(target_rank)
+                    transition_label = f"{source_label} -> {target_label}"
+                    for fi, fname in enumerate(feature_names):
+                        records.append(
+                            {
+                                "subject": subj,
+                                "state_idx": int(edge_idx),
+                                "state_label": transition_label,
+                                "state_rank": int(edge_rank),
+                                "source_state_idx": int(source_idx),
+                                "target_state_idx": int(target_idx),
+                                "source_state_label": source_label,
+                                "target_state_label": target_label,
+                                "transition_label": transition_label,
+                                "transition_kind": "directed_edge",
+                                "feature": fname,
+                                "feature_idx": int(fi),
+                                "weight": float(weights[source_idx, target_idx, fi]),
+                            }
+                        )
+            continue
+
+        weights_std = _standardize_target_transition_weights(weights)
         feature_names = _transition_feature_names(
             getattr(view, "U_cols", []),
             int(weights_std.shape[1]),
@@ -454,6 +482,12 @@ def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFram
                         "state_idx": k,
                         "state_label": lbl,
                         "state_rank": rank,
+                        "source_state_idx": None,
+                        "target_state_idx": int(k),
+                        "source_state_label": None,
+                        "target_state_label": lbl,
+                        "transition_label": f"to {lbl}",
+                        "transition_kind": "target_state",
                         "feature": fname,
                         "feature_idx": int(fi),
                         "weight": float(weights_std[k, fi]),
