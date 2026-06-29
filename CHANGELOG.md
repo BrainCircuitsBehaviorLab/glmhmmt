@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.13
+- Fixed saving bug for GLM-hMMt default non transitions model.
+
+
 ## 0.3.12
 - Restored directed-edge input-driven transition weights for GLM-HMM-T fits.
 
