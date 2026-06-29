@@ -147,6 +147,18 @@ def _count_free_params(result: dict) -> int:
     return int(transition_params + emission_params)
 
 
+def _transition_arrays(result: dict) -> dict[str, np.ndarray]:
+    transitions = result["fitted_params"].transitions
+    if hasattr(transitions, "transition_matrix"):
+        return {"transition_matrix": np.asarray(transitions.transition_matrix)}
+    if hasattr(transitions, "bias") and hasattr(transitions, "weights"):
+        return {
+            "transition_bias": np.asarray(transitions.bias),
+            "transition_weights": np.asarray(transitions.weights),
+        }
+    raise TypeError(f"Unsupported transition parameter type: {type(transitions).__name__}")
+
+
 def fit_subject(
     subject: str,
     K: int,
@@ -482,8 +494,7 @@ def save_results(result: dict, out_dir: Path) -> None:
         predictive_state_probs=result["predictive_state_probs"],
         initial_probs=np.asarray(result["fitted_params"].initial.probs),
         emission_weights=np.asarray(result["fitted_params"].emissions.weights),
-        transition_bias=np.asarray(result["fitted_params"].transitions.bias),
-        transition_weights=np.asarray(result["fitted_params"].transitions.weights),
+        **_transition_arrays(result),
         names=result["names"],
         y=result["y"],
         X=result["X"],
@@ -547,8 +558,7 @@ def save_cv_results(result: dict, out_dir: Path) -> None:
         predictive_state_probs=result["predictive_state_probs"],
         initial_probs=np.asarray(result["fitted_params"].initial.probs),
         emission_weights=np.asarray(result["fitted_params"].emissions.weights),
-        transition_bias=np.asarray(result["fitted_params"].transitions.bias),
-        transition_weights=np.asarray(result["fitted_params"].transitions.weights),
+        **_transition_arrays(result),
         names=result["names"],
         y=result["y"],
         X=result["X"],
