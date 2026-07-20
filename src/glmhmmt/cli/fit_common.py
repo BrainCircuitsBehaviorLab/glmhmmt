@@ -2,10 +2,10 @@ import hashlib
 import json
 from typing import Any, Callable
 
-import jax.random as jr
-import jax.numpy as jnp
 import numpy as np
 import polars as pl
+
+from glmhmmt._fit_utils import fit_best_restart, raw_loglik_multisession, score_split
 
 FIT_ROW_ID_COL = "_fit_row_id"
 CV_SESSION_ID_COL = "_cv_session_id"
@@ -65,61 +65,6 @@ def stable_model_id(
         "cv_repeats": cv_repeats,
     }
     return hashlib.md5(json.dumps(config, sort_keys=True).encode()).hexdigest()[:8]
-
-
-def fit_best_restart(
-    model,
-    *,
-    n_restarts: int,
-    base_seed: int,
-    fit_once: Callable[[Any, Any], tuple[Any, Any]],
-    failure_message: str,
-    progress_callback: Callable[[dict[str, Any]], None] | None = None,
-    progress_payload: dict[str, Any] | None = None,
-) -> tuple[Any, np.ndarray, int]:
-    """Run repeated seeded fits and keep the restart with the best final log-probability."""
-    best_lp = -np.inf
-    best_params = None
-    best_lps = None
-    best_restart = -1
-    payload = progress_payload or {}
-
-    for restart_idx in range(int(n_restarts)):
-        if progress_callback is not None:
-            progress_callback(
-                {
-                    "event": "restart_start",
-                    "restart_index": restart_idx + 1,
-                    "restart_total": int(n_restarts),
-                    **payload,
-                }
-            )
-
-        key = jr.PRNGKey(int(base_seed) + restart_idx)
-        params, props = model.initialize(key=key)
-        fitted_params, lps = fit_once(params, props)
-        final_lp = float(np.asarray(lps)[-1])
-
-        if progress_callback is not None:
-            progress_callback(
-                {
-                    "event": "restart_complete",
-                    "restart_index": restart_idx + 1,
-                    "restart_total": int(n_restarts),
-                    "log_prob": final_lp,
-                    **payload,
-                }
-            )
-
-        if final_lp > best_lp:
-            best_lp = final_lp
-            best_params = fitted_params
-            best_lps = np.asarray(lps)
-            best_restart = restart_idx + 1
-
-    if best_params is None or best_lps is None:
-        raise ValueError(failure_message)
-    return best_params, best_lps, int(best_restart)
 
 
 def attach_feature_row_ids(feature_df: pl.DataFrame) -> pl.DataFrame:
@@ -356,18 +301,6 @@ def resegment_subsampled_trials(
     return df_sorted.with_columns(pl.Series(output_session_col, seg_ids))
 
 
-def raw_loglik_multisession(model, params, emissions, inputs, session_ids) -> float:
-    """Return the summed data log-likelihood without any parameter prior."""
-    if int(np.asarray(emissions).shape[0]) == 0:
-        return 0.0
-    sessions = model._split_by_session(emissions, inputs, session_ids)
-    if not sessions:
-        return 0.0
-    e_pad, i_pad, _ = model._pad_sessions(sessions)
-    _batch_stats, ll_batch = model._batched_e_step_jit(params, e_pad, i_pad)
-    return float(jnp.sum(ll_batch))
-
-
 def align_design_matrix_to_columns(
     values,
     value_cols: list[str],
@@ -395,28 +328,3 @@ def align_design_matrix_to_columns(
         if src_idx is not None:
             aligned[:, dst_idx] = arr[:, src_idx]
     return aligned, reference_cols
-
-
-def score_split(model, params, emissions, inputs, session_ids) -> dict[str, Any]:
-    """Evaluate one fitted model on a train or test split."""
-    T = int(np.asarray(emissions).shape[0])
-    if T == 0:
-        return {
-            "raw_ll": 0.0,
-            "ll_per_trial": np.nan,
-            "acc": np.nan,
-            "T": 0,
-            "p_pred": np.empty((0, getattr(model, "num_classes", 0))),
-        }
-    raw_ll = raw_loglik_multisession(model, params, emissions, inputs, session_ids)
-    p_pred = np.asarray(
-        model.predict_choice_probs_multisession(params, emissions, inputs, session_ids=session_ids)
-    )
-    acc = float(np.mean(np.argmax(p_pred, axis=1) == np.asarray(emissions))) if T else np.nan
-    return {
-        "raw_ll": raw_ll,
-        "ll_per_trial": raw_ll / T if T else np.nan,
-        "acc": acc,
-        "T": T,
-        "p_pred": p_pred,
-    }

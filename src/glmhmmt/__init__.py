@@ -4,6 +4,10 @@ from importlib import import_module
 
 __all__ = [
     "SoftmaxGLMHMM",
+    "CVFoldResult",
+    "FitResult",
+    "fit_glmhmm",
+    "fit_hmm",
     "GLMFitResult",
     "fit_glm",
     "SubjectFitView",
@@ -32,6 +36,10 @@ __all__ = [
 
 _LAZY_IMPORTS = {
     "SoftmaxGLMHMM": ("glmhmmt.model", "SoftmaxGLMHMM"),
+    "CVFoldResult": ("glmhmmt.fit", "CVFoldResult"),
+    "FitResult": ("glmhmmt.fit", "FitResult"),
+    "fit_glmhmm": ("glmhmmt.fit", "fit_glmhmm"),
+    "fit_hmm": ("glmhmmt.fit", "fit_hmm"),
     "GLMFitResult": ("glmhmmt.glm", "GLMFitResult"),
     "fit_glm": ("glmhmmt.glm", "fit_glm"),
     "SubjectFitView": ("glmhmmt.views", "SubjectFitView"),

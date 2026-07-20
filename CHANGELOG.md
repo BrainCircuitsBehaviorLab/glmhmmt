@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+- Added the public, array-first `fit_glmhmm` / `fit_hmm` interface shared by
+  standard GLM-HMM and transition-regressor GLM-HMM-T models.
+- Added typed `FitResult` and `CVFoldResult` outputs with aligned trial-level
+  probabilities, full-data metrics, and session-level K-fold metrics.
+- Added deterministic session-level cross-validation followed by a separate
+  full-data fit, strict pre-fit array validation, and feature-name-based frozen
+  emissions.
+- Kept the task-aware CLI fitters as documented legacy entry points while
+  moving shared restart and scoring code into an I/O-free numerical helper.
+- Restricted NumPy to the 2.0 series for compatibility with the pinned
+  TensorFlow Probability 0.25 and JAX 0.4 runtime.
+
 ## 0.3.13
 - Fixed saving bug for GLM-hMMt default non transitions model.
 

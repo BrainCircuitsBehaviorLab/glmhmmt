@@ -1,3 +1,9 @@
+"""Legacy task-aware GLM-HMM-T CLI.
+
+New numerical code should use :func:`glmhmmt.fit_hmm` with prepared arrays.
+This module remains available temporarily for downstream notebook compatibility.
+"""
+
 import json
 from pathlib import Path
 from typing import Any, Callable

@@ -32,6 +32,36 @@ If they want the baseline GLM fit directly in their own code, including binary l
 from glmhmmt import fit_glm
 ```
 
+## Array-first GLM-HMM fitting
+
+Use `fit_glmhmm` when choices are already encoded and the emission and
+transition design matrices have already been constructed by the calling
+analysis. The function performs no dataset loading, task resolution, feature
+construction, model naming, or file writing.
+
+```python
+from glmhmmt import fit_glmhmm
+
+fit = fit_glmhmm(
+    y=choices,
+    X=emission_matrix,
+    U=transition_matrix,
+    session_ids=session_ids,
+    num_states=2,
+    num_classes=2,
+    emission_names=["bias", "stimulus", "choice_history"],
+    transition_names=["reward_history"],
+    baseline_class_idx=0,
+    cv_folds=5,
+    seed=0,
+)
+```
+
+Pass `U=None` for a standard GLM-HMM or a `(T, Q)` transition matrix for a
+GLM-HMM-T. Cross-validation splits whole sessions and is followed by a separate
+fit on all trials; fold metrics are available in `fit.cv_metrics`. The same
+function is also exported as `fit_hmm`.
+
 ## Direct Model Use
 
 See [`examples/use_softmax_glmhmm.py`](examples/use_softmax_glmhmm.py) for a minimal example that builds the model directly from arrays, without any task adapter.
@@ -73,14 +103,15 @@ At runtime, config precedence is:
 
 The published package is tested against:
 
+- Python 3.11–3.13
 - `jax==0.4.35`
 - `jaxlib==0.4.35`
 - `tensorflow-probability==0.25.0`
 - `optax==0.2.5`
+- `numpy>=2.0,<2.1`
 
-These pins are intentionally conservative because newer JAX / TFP combinations
-have broken the `tensorflow_probability.substrates.jax` import path used by
-`dynamax` and `glmhmmt.model`.
+These bounds are intentionally conservative because newer JAX / TFP and NumPy
+combinations have broken APIs used by `dynamax` and `glmhmmt.model`.
 
 ## Task Adapters Are Optional
 
