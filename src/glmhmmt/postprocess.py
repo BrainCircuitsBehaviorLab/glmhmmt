@@ -402,6 +402,47 @@ def _transition_feature_names(feature_names, D: int) -> list[str]:
     return names + [f"u{idx}" for idx in range(len(names), D)]
 
 
+def _nonself_target_indices(K: int) -> list[list[int]]:
+    return [[target_idx for target_idx in range(K) if target_idx != source_idx] for source_idx in range(K)]
+
+
+def _expand_self_baseline_transition_bias(bias: np.ndarray) -> np.ndarray:
+    """Expand ``(K, K-1)`` self-baseline logits to full ``(K, K)`` logits."""
+    bias = np.asarray(bias, dtype=float)
+    if bias.ndim != 2:
+        raise ValueError(f"transition_bias must be 2D, got ndim={bias.ndim}.")
+    K = int(bias.shape[0])
+    if bias.shape[1] == K:
+        return bias
+    if bias.shape[1] != K - 1:
+        raise ValueError(f"transition_bias must have shape (K, K) or (K, K-1), got {tuple(bias.shape)}.")
+    full = np.zeros((K, K), dtype=float)
+    for source_idx, target_indices in enumerate(_nonself_target_indices(K)):
+        full[source_idx, target_indices] = bias[source_idx]
+    return full
+
+
+def _self_baseline_transition_weight_edges(weights: np.ndarray, K: int) -> tuple[np.ndarray, list[list[int]]]:
+    """Return non-self transition weights relative to the self-transition baseline."""
+    weights = np.asarray(weights, dtype=float)
+    targets = _nonself_target_indices(K)
+    if weights.ndim != 3:
+        raise ValueError(f"transition_weights must be 3D for directed edges, got ndim={weights.ndim}.")
+    if weights.shape[0] != K:
+        raise ValueError(f"transition_weights first dimension must be K={K}, got {tuple(weights.shape)}.")
+    if weights.shape[1] == K - 1:
+        return weights, targets
+    if weights.shape[1] == K:
+        edge_weights = np.empty((K, K - 1, weights.shape[2]), dtype=float)
+        for source_idx, target_indices in enumerate(targets):
+            self_weights = weights[source_idx, source_idx, :]
+            edge_weights[source_idx] = weights[source_idx, target_indices, :] - self_weights
+        return edge_weights, targets
+    raise ValueError(
+        f"transition_weights must have shape (K, K-1, D) or legacy (K, K, D); got {tuple(weights.shape)} for K={K}."
+    )
+
+
 def _standardize_target_transition_weights(weights: np.ndarray) -> np.ndarray:
     """Convert old target-state transition weights to plottable target rows."""
     weights = np.asarray(weights, dtype=float)
@@ -429,19 +470,15 @@ def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFram
         weights = np.asarray(transition_weights, dtype=float)
         K = int(view.K)
         if weights.ndim == 3:
-            if weights.shape[0] != K or weights.shape[1] != K:
-                raise ValueError(
-                    f"directed transition_weights for subject {subj!r} must have shape (K, K, D); "
-                    f"got {tuple(weights.shape)} for K={K}."
-                )
+            edge_weights, target_indices_by_source = _self_baseline_transition_weight_edges(weights, K)
             feature_names = _transition_feature_names(
                 getattr(view, "U_cols", []),
-                int(weights.shape[2]),
+                int(edge_weights.shape[2]),
             )
             for source_idx in range(K):
                 source_label = view.state_name_by_idx.get(source_idx, f"State {source_idx}")
                 source_rank = view.state_rank_by_idx.get(source_idx, source_idx)
-                for target_idx in range(K):
+                for local_target_idx, target_idx in enumerate(target_indices_by_source[source_idx]):
                     target_label = view.state_name_by_idx.get(target_idx, f"State {target_idx}")
                     target_rank = view.state_rank_by_idx.get(target_idx, target_idx)
                     edge_idx = source_idx * K + target_idx
@@ -459,10 +496,10 @@ def build_transition_weights_df(views: dict[str, SubjectFitView]) -> pl.DataFram
                                 "source_state_label": source_label,
                                 "target_state_label": target_label,
                                 "transition_label": transition_label,
-                                "transition_kind": "directed_edge",
+                                "transition_kind": "self_baseline_edge",
                                 "feature": fname,
                                 "feature_idx": int(fi),
-                                "weight": float(weights[source_idx, target_idx, fi]),
+                                "weight": float(edge_weights[source_idx, local_target_idx, fi]),
                             }
                         )
             continue
@@ -795,7 +832,7 @@ def _resolve_transition_matrix_from_arrays(
     if "transition_matrix" in arr:
         return np.asarray(arr["transition_matrix"], dtype=float)
     if "transition_bias" in arr:
-        bias = np.asarray(arr["transition_bias"], dtype=float)
+        bias = _expand_self_baseline_transition_bias(np.asarray(arr["transition_bias"], dtype=float))
         exp_bias = np.exp(bias - bias.max(axis=-1, keepdims=True))
         return exp_bias / exp_bias.sum(axis=-1, keepdims=True)
     return None
@@ -1067,8 +1104,9 @@ def _transition_matrix_from_view(view) -> np.ndarray | None:
     transition_weights = getattr(view, "transition_weights", None)
     if transition_bias is None or transition_weights is not None:
         return None
-    bias = np.asarray(transition_bias, dtype=float)
-    if bias.ndim != 2:
+    try:
+        bias = _expand_self_baseline_transition_bias(np.asarray(transition_bias, dtype=float))
+    except ValueError:
         return None
     shifted = bias - bias.max(axis=-1, keepdims=True)
     exp_shifted = np.exp(shifted)

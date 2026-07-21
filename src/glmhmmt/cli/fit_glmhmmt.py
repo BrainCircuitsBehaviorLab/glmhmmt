@@ -136,7 +136,7 @@ def _count_free_params(result: dict) -> int:
 
     transition_params = K * (K - 1)
     if u_dim > 0:
-        transition_params += K * K * u_dim
+        transition_params += K * (K - 1) * u_dim
 
     frozen = normalize_frozen_emissions(result.get("frozen_emissions", {}))
     x_cols = [str(col) for col in result.get("names", {}).get("X_cols", [])]

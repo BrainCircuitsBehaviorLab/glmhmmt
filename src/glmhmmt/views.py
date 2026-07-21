@@ -200,17 +200,21 @@ class SubjectFitView:
     transition_matrix :
         Homogeneous transition matrix shape ``(K, K)`` when available.
     transition_bias :
-        Input-driven transition bias shape ``(K, K)`` — GLM-HMM-t only.
+        Input-driven non-self transition bias shape ``(K, K - 1)`` with the
+        self-transition logit fixed to zero — GLM-HMM-t only. Older fits may
+        store full ``(K, K)`` bias matrices.
     transition_weights :
-        Input-driven directed-edge transition weights, shape ``(K, K, D)``.
-        Older target-only fits may store ``(K, D)`` or ``(K - 1, D)``.
+        Input-driven non-self transition weights, shape ``(K, K - 1, D)``,
+        interpreted relative to the self-transition baseline. Older fits may
+        store full directed-edge ``(K, K, D)`` or target-only ``(K, D)`` /
+        ``(K - 1, D)`` weights.
     U :
         Transition design matrix, shape ``(T, D)`` — GLM-HMM-t only.
     U_cols :
         Transition feature names, length ``D``.
     transition_weight_baseline_idx :
         Deprecated metadata for older alternative-formulation GLM-HMM-T fits.
-        Directed-edge fits save ``-1`` because no target baseline is implicit.
+        New transition fits use the row-specific self transition as baseline.
     baseline_class_idx :
         Choice class used as the implicit softmax reference. The stored
         ``emission_weights`` rows are aligned to class-index order with this
@@ -236,8 +240,8 @@ class SubjectFitView:
     p_pred: Optional[np.ndarray] = None  # (T, C)
     initial_probs: Optional[np.ndarray] = None  # (K,)
     transition_matrix: Optional[np.ndarray] = None  # (K, K) or (T-1, K, K)
-    transition_bias: Optional[np.ndarray] = None  # (K, K)
-    transition_weights: Optional[np.ndarray] = None  # (K, K, D), with old target-only fits as (K, D) or (K - 1, D)
+    transition_bias: Optional[np.ndarray] = None  # (K, K - 1), or legacy (K, K)
+    transition_weights: Optional[np.ndarray] = None  # (K, K - 1, D), or legacy (K, K, D)/(K, D)/(K - 1, D)
     U: Optional[np.ndarray] = None  # (T, D)
     U_cols: list[str] = field(default_factory=list)
     transition_weight_baseline_idx: Optional[int] = None
@@ -432,7 +436,7 @@ def build_views(
             transition_weight_baseline_idx=(
                 int(np.asarray(d["transition_weight_baseline_idx"]).reshape(()))
                 if "transition_weight_baseline_idx" in d
-                else (-1 if transition_weights is not None and transition_weights.ndim == 3 else None)
+                else None
             ),
             baseline_class_idx=baseline_class_idx,
             emission_model=emission_model,

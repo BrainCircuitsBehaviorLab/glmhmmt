@@ -48,6 +48,22 @@ def _state_labels_and_colors(view):
     return rank_order, labels, colors
 
 
+def _expand_self_baseline_transition_bias(bias: np.ndarray) -> np.ndarray | None:
+    bias = np.asarray(bias, dtype=float)
+    if bias.ndim != 2:
+        return None
+    K = int(bias.shape[0])
+    if bias.shape[1] == K:
+        return bias
+    if bias.shape[1] != K - 1:
+        return None
+    full = np.zeros((K, K), dtype=float)
+    for source_idx in range(K):
+        target_indices = [target_idx for target_idx in range(K) if target_idx != source_idx]
+        full[source_idx, target_indices] = bias[source_idx]
+    return full
+
+
 def _resolve_static_transition_matrix(view) -> np.ndarray | None:
     transition_matrix = getattr(view, "transition_matrix", None)
     if transition_matrix is not None:
@@ -59,8 +75,8 @@ def _resolve_static_transition_matrix(view) -> np.ndarray | None:
     if transition_bias is None or transition_weights is not None:
         return None
 
-    bias = np.asarray(transition_bias, dtype=float)
-    if bias.ndim != 2:
+    bias = _expand_self_baseline_transition_bias(np.asarray(transition_bias, dtype=float))
+    if bias is None:
         return None
 
     shifted = bias - bias.max(axis=-1, keepdims=True)

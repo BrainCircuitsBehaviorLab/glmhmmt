@@ -28,8 +28,10 @@ def _is_directed_transition_weights_df(weights_df) -> bool:
     if "transition_kind" not in columns:
         return False
     if hasattr(weights_df, "get_column"):
-        return "directed_edge" in set(weights_df.get_column("transition_kind").to_list())
-    return "directed_edge" in set(weights_df["transition_kind"].astype(str).tolist())
+        kinds = set(weights_df.get_column("transition_kind").to_list())
+    else:
+        kinds = set(weights_df["transition_kind"].astype(str).tolist())
+    return bool(kinds - {"target_state"})
 
 
 def _plot_k_for_transition_weights(weights_df, K: int | None) -> int | None:

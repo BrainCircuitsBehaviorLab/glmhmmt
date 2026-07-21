@@ -27,8 +27,8 @@ class _DummyAdapter:
 def _view(subject: str, offset: float = 0.0) -> SubjectFitView:
     transition_weights = np.asarray(
         [
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[5.0, 6.0], [7.0, 8.0]],
+            [[1.0, 2.0]],
+            [[3.0, 4.0]],
         ],
         dtype=float,
     )
@@ -49,7 +49,7 @@ def _view(subject: str, offset: float = 0.0) -> SubjectFitView:
     )
 
 
-def test_build_transition_weights_df_preserves_directed_edges():
+def test_build_transition_weights_df_preserves_self_baseline_edges():
     weights_df = build_transition_weights_df({"s1": _view("s1")})
 
     assert weights_df.columns == [
@@ -70,15 +70,14 @@ def test_build_transition_weights_df_preserves_directed_edges():
 
     rows = weights_df.sort(["source_state_idx", "target_state_idx", "feature_idx"]).to_dicts()
     assert [row["transition_label"] for row in rows[::2]] == [
-        "Disengaged -> Disengaged",
         "Disengaged -> Engaged",
         "Engaged -> Disengaged",
-        "Engaged -> Engaged",
     ]
-    assert [row["feature"] for row in rows[:4]] == ["A_plus", "A_minus", "A_plus", "A_minus"]
+    assert [row["feature"] for row in rows] == ["A_plus", "A_minus", "A_plus", "A_minus"]
+    assert [row["transition_kind"] for row in rows] == ["self_baseline_edge"] * 4
     assert np.allclose(
         [row["weight"] for row in rows],
-        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        [1.0, 2.0, 3.0, 4.0],
     )
 
 
@@ -93,7 +92,7 @@ def test_build_transition_weights_df_expands_alternative_formulation_weights():
     assert np.allclose([row["weight"] for row in rows], [1.0, 2.0, -1.0, -2.0])
 
 
-def test_input_driven_transitions_use_destination_inputs_and_directed_edge_weights():
+def test_input_driven_transitions_use_destination_inputs_and_self_baseline_weights():
     transitions = InputDrivenSoftmaxTransitions(
         num_states=2,
         emission_input_dim=1,
@@ -101,11 +100,11 @@ def test_input_driven_transitions_use_destination_inputs_and_directed_edge_weigh
         stickiness=0.0,
     )
     params = ParamsInputDrivenTransitions(
-        bias=jnp.zeros((2, 2), dtype=jnp.float32),
+        bias=jnp.zeros((2, 1), dtype=jnp.float32),
         weights=jnp.asarray(
             [
-                [[0.0], [2.0]],
-                [[0.0], [0.0]],
+                [[2.0]],
+                [[0.0]],
             ],
             dtype=jnp.float32,
         ),
@@ -138,10 +137,10 @@ def test_input_driven_transitions_use_destination_inputs_and_directed_edge_weigh
         rtol=1e-6,
     )
     np.testing.assert_allclose(matrices[:, 1, :], 0.5)
-    assert params.weights.shape == (2, 2, 1)
+    assert params.weights.shape == (2, 1, 1)
 
 
-def test_input_driven_transitions_coerce_old_target_weights_to_edges():
+def test_input_driven_transitions_coerce_old_target_weights_to_self_baseline_edges():
     transitions = InputDrivenSoftmaxTransitions(
         num_states=2,
         emission_input_dim=1,
@@ -151,15 +150,15 @@ def test_input_driven_transitions_coerce_old_target_weights_to_edges():
 
     params, _ = transitions.initialize(weights=jnp.asarray([[2.0]], dtype=jnp.float32))
 
-    assert params.weights.shape == (2, 2, 1)
+    assert params.weights.shape == (2, 1, 1)
     np.testing.assert_allclose(
         np.asarray(params.weights[:, :, 0]),
-        np.asarray([[2.0, 0.0], [2.0, 0.0]]),
+        np.asarray([[-2.0], [2.0]]),
     )
 
 
-def test_build_views_keeps_directed_transition_weight_shape():
-    transition_weights = np.arange(8, dtype=float).reshape(2, 2, 2)
+def test_build_views_keeps_self_baseline_transition_weight_shape():
+    transition_weights = np.arange(4, dtype=float).reshape(2, 1, 2)
     arrays = {
         "smoothed_probs": np.ones((2, 2), dtype=float) / 2,
         "predictive_state_probs": np.ones((2, 2), dtype=float) / 2,
@@ -173,8 +172,8 @@ def test_build_views_keeps_directed_transition_weight_shape():
 
     view = build_views({"s1": arrays}, _DummyAdapter(), K=2, subjects=["s1"])["s1"]
 
-    assert view.transition_weights.shape == (2, 2, 2)
-    assert view.transition_weight_baseline_idx == -1
+    assert view.transition_weights.shape == (2, 1, 2)
+    assert view.transition_weight_baseline_idx is None
     np.testing.assert_allclose(view.transition_weights, transition_weights)
 
 
@@ -191,10 +190,8 @@ def test_transition_weight_plots_use_emission_style_dataframe():
     assert ax_summary.get_ylabel() == "Transition weight"
     assert [tick.get_text() for tick in ax_summary.get_xticklabels()] == ["A_plus", "A_minus"]
     assert [text.get_text() for text in ax_summary.get_legend().get_texts()] == [
-        "Engaged -> Engaged",
         "Engaged -> Disengaged",
         "Disengaged -> Engaged",
-        "Disengaged -> Disengaged",
     ]
 
     fig_subjects.clf()

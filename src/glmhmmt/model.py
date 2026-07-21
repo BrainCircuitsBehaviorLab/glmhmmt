@@ -415,8 +415,8 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
 
 
 class ParamsInputDrivenTransitions(NamedTuple):
-    bias: Union[Float[Array, "num_states num_states"], ParameterProperties]
-    weights: Union[Float[Array, "num_states num_states input_dim"], ParameterProperties]
+    bias: Union[Float[Array, "num_states num_states_minus1"], ParameterProperties]
+    weights: Union[Float[Array, "num_states num_states_minus1 input_dim"], ParameterProperties]
 
 
 class InputDrivenSoftmaxTransitions(HMMTransitions):
@@ -436,28 +436,62 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         self.transition_input_dim = transition_input_dim
         self.weight_scale = weight_scale
         self.stickiness = stickiness
+        nonself_targets = np.asarray(
+            [[j for j in range(num_states) if j != i] for i in range(num_states)],
+            dtype=np.int32,
+        )
+        self._source_idx = jnp.arange(num_states, dtype=jnp.int32)[:, None]
+        self._nonself_target_idx = jnp.asarray(nonself_targets, dtype=jnp.int32)
 
-    def _normalize_bias(self, bias):
-        """Store baseline transition logits in row-normalized gauge."""
-        return jax.nn.log_softmax(bias, axis=-1)
+    def _expand_bias(self, bias):
+        full = jnp.zeros((self.num_states, self.num_states), dtype=bias.dtype)
+        return full.at[self._source_idx, self._nonself_target_idx].set(bias)
+
+    def _expand_weights(self, weights):
+        full = jnp.zeros(
+            (self.num_states, self.num_states, self.transition_input_dim),
+            dtype=weights.dtype,
+        )
+        return full.at[self._source_idx, self._nonself_target_idx, :].set(weights)
+
+    def _coerce_bias(self, bias, dtype=jnp.float32):
+        """Accept self-baseline biases and convert old full bias matrices."""
+        b = jnp.asarray(bias, dtype)
+        K = self.num_states
+        if b.shape == (K, K - 1):
+            return b
+        if b.shape == (K, K):
+            self_bias = b[jnp.arange(K), jnp.arange(K)][:, None]
+            contrasts = b - self_bias
+            return contrasts[self._source_idx, self._nonself_target_idx]
+        raise ValueError(
+            "transition bias must have shape (K, K-1), or old full shape "
+            f"(K, K); got {tuple(b.shape)} for K={K}."
+        )
 
     def _coerce_weights(self, weights, dtype=jnp.float32):
-        """Accept directed-edge weights and target-weight warm-start formats."""
+        """Accept self-baseline weights and convert old warm-start formats."""
         W = jnp.asarray(weights, dtype)
         K = self.num_states
         D = self.transition_input_dim
-        if W.ndim == 3 and W.shape == (K, K, D):
+        if W.ndim == 3 and W.shape == (K, K - 1, D):
             return W
+        if W.ndim == 3 and W.shape == (K, K, D):
+            self_weights = W[jnp.arange(K), jnp.arange(K), :][:, None, :]
+            contrasts = W - self_weights
+            return contrasts[self._source_idx, self._nonself_target_idx, :]
         if W.ndim == 2:
             if W.shape == (K, D):
-                return jnp.broadcast_to(W[None, :, :], (K, K, D))
+                full = jnp.broadcast_to(W[None, :, :], (K, K, D))
+                return self._coerce_weights(full, dtype=dtype)
             if W.shape == (K - 1, D):
                 zero = jnp.zeros((1, D), dtype=W.dtype)
                 target_weights = jnp.concatenate([W, zero], axis=0)
-                return jnp.broadcast_to(target_weights[None, :, :], (K, K, D))
+                full = jnp.broadcast_to(target_weights[None, :, :], (K, K, D))
+                return self._coerce_weights(full, dtype=dtype)
         raise ValueError(
-            "transition weights must have shape (K, K, D), or old target-weight "
-            f"shape (K, D) or (K-1, D); got {tuple(W.shape)} for K={K}, D={D}."
+            "transition weights must have shape (K, K-1, D), or old shape "
+            f"(K, K, D), (K, D), or (K-1, D); got {tuple(W.shape)} for K={K}, D={D}."
         )
 
     def initialize(self, key: Optional[Array] = None, method: str = "prior", bias=None, weights=None):
@@ -467,14 +501,13 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         K, D = self.num_states, self.transition_input_dim
 
         if bias is None:
-            b = jnp.zeros((K, K), dtype=jnp.float32)
-            # Apply stickiness as an initial diagonal offset (learnable from here)
-            b = b + self.stickiness * jnp.eye(K, dtype=jnp.float32)
+            # Self-transition logits are fixed at zero, so negative non-self
+            # logits initialize persistent state dynamics.
+            b = -float(self.stickiness) * jnp.ones((K, K - 1), dtype=jnp.float32)
         else:
-            b = jnp.asarray(bias, jnp.float32)
-        b = self._normalize_bias(b)
+            b = self._coerce_bias(bias, jnp.float32)
         W = (
-            self.weight_scale * jr.normal(key2, (K, K, D), dtype=jnp.float32)
+            self.weight_scale * jr.normal(key2, (K, K - 1, D), dtype=jnp.float32)
             if weights is None
             else self._coerce_weights(weights, jnp.float32)
         )
@@ -491,7 +524,9 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
     def distribution(self, params, state, inputs=None):
         u = inputs[self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]
         i = jnp.asarray(state, jnp.int32)
-        logits = params.bias[i] + jnp.einsum("jd,d->j", params.weights[i], u)
+        bias_full = self._expand_bias(params.bias)
+        weights_full = self._expand_weights(params.weights)
+        logits = bias_full[i] + jnp.einsum("jd,d->j", weights_full[i], u)
         return tfd.Categorical(logits=logits)
 
     def _compute_transition_matrices(self, params, inputs):
@@ -504,7 +539,9 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
 
         # u_{t+1} is used for transition t -> t+1, matching Dynamax.
         u = inputs[1:, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (T-1, D)
-        logits = params.bias[None, :, :] + jnp.einsum("ijd,td->tij", params.weights, u)  # (T-1,K,K)
+        bias_full = self._expand_bias(params.bias)
+        weights_full = self._expand_weights(params.weights)
+        logits = bias_full[None, :, :] + jnp.einsum("ijd,td->tij", weights_full, u)  # (T-1,K,K)
         return jax.nn.softmax(logits, axis=-1)
 
     def collect_suff_stats(self, params, posterior, inputs=None):
@@ -533,7 +570,9 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
 
         def loss_fn(b, W):
             # logits[n,i,j] = b[i,j] + sum_d W[i,j,d] u[n,d]
-            logits = b[None, :, :] + jnp.einsum("ijd,nd->nij", W, u)  # (N,K,K)
+            b_full = self._expand_bias(b)
+            W_full = self._expand_weights(W)
+            logits = b_full[None, :, :] + jnp.einsum("ijd,nd->nij", W_full, u)  # (N,K,K)
             logp = jax.nn.log_softmax(logits, axis=-1)  # (N,K,K)
             nll = -(xi * logp).sum()
             reg = l2 * (jnp.sum(b * b) + jnp.sum(W * W))
@@ -547,7 +586,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             loss, grads = jax.value_and_grad(loss_fn, argnums=(0, 1))(b, W)
             updates, opt_state = opt.update(grads, opt_state, (b, W))
             b, W = optax.apply_updates((b, W), updates)
-            b = self._normalize_bias(jnp.clip(b, -clip_val, clip_val))
+            b = jnp.clip(b, -clip_val, clip_val)
             W = jnp.clip(W, -clip_val, clip_val)
             return (b, W, opt_state), loss
 

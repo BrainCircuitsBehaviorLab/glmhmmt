@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+- Switched GLM-HMM-T transition regressors to the identifiable self-transition
+  baseline parametrization.
+- Relaxed the NumPy dependency upper bound.
+
 ## 0.4.0
 - Added the public, array-first `fit_glmhmm` / `fit_hmm` interface shared by
   standard GLM-HMM and transition-regressor GLM-HMM-T models.
