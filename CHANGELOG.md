@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.2
+- Added frozen transitions API
+
 ## 0.4.1
 - Switched GLM-HMM-T transition regressors to the identifiable self-transition
   baseline parametrization.
