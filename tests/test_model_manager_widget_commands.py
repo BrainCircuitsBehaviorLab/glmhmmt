@@ -174,6 +174,9 @@ def test_update_options_keeps_full_glm_default_regressor_list(monkeypatch, tmp_p
     class FakeAdapter:
         num_classes = 2
 
+        def condition_filter_options(self):
+            return []
+
         def read_dataset(self):
             return pl.DataFrame({"subject": ["s1", "s2"]})
 
@@ -219,3 +222,24 @@ def test_update_options_keeps_full_glm_default_regressor_list(monkeypatch, tmp_p
 
     assert widget.emission_cols == [f"reg_{idx}" for idx in range(12)]
     assert widget.existing_models_info[0]["regressors"] == ", ".join(f"reg_{idx}" for idx in range(12))
+
+
+def test_transition_freezes_survive_config_roundtrip(monkeypatch, tmp_path):
+    widget = _make_widget(monkeypatch, tmp_path)
+    monkeypatch.setattr(widget, "_refresh_groups", lambda: None)
+    monkeypatch.setattr(widget, "_ensure_state_scoring_defaults", lambda: None)
+    widget.model_type = "glmhmmt"
+    spec = {"1": {"Drug": 0.0, "drug_x_cumulative_reward": 0.75}}
+    widget._apply_config_to_state({
+        "alias": "restricted", "task": "MCDR", "K_list": [2],
+        "emission_cols": ["bias"], "transition_cols": ["Drug", "drug_x_cumulative_reward"],
+        "frozen_transitions": spec,
+    })
+    assert widget.frozen_transitions == spec
+    assert widget.model_cfg.frozen_transitions == spec
+    cfg = widget._build_current_config("restricted")
+    assert cfg["frozen_transitions"] == spec
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
+    assert widget._saved_config_matches_current(tmp_path)
+    widget.frozen_transitions = {"1": {"Drug": 1.0}}
+    assert not widget._saved_config_matches_current(tmp_path)

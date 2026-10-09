@@ -62,6 +62,91 @@ GLM-HMM-T. Cross-validation splits whole sessions and is followed by a separate
 fit on all trials; fold metrics are available in `fit.cv_metrics`. The same
 function is also exported as `fit_hmm`.
 
+## Frozen emission and transition coefficients
+
+Both options use `{internal_state_index: {feature_name: fixed_value}}`.
+Integer keys and JSON string keys are equivalent. Names follow the ordered
+columns of `X` and `U`, respectively. `None` and `{}` preserve unrestricted
+behavior.
+
+For a two-state model, identify the states outside the library using the base
+fit on training data. For example, if that fit identifies internal state 0 as
+Engaged and state 1 as Disengaged:
+
+```python
+from glmhmmt import fit_hmm
+
+# X, U and names are constructed by the analysis project.
+# U includes numeric columns named "Drug" and "drug_x_cumulative_reward".
+disengaged_idx = state_indices_from_training_baseline["Disengaged"]  # 1 here
+frozen_emissions = {disengaged_idx: {"drug_x_choice_lag_param": 0.0}}
+frozen_transitions = {
+    disengaged_idx: {"Drug": 0.0, "drug_x_cumulative_reward": 0.0}
+}
+fit = fit_hmm(
+    y, X, session_ids, U=U,
+    num_states=2, num_classes=2,
+    emission_names=names["X_cols"],
+    transition_names=names["U_cols"],
+    frozen_emissions=frozen_emissions,
+    frozen_transitions=frozen_transitions,
+)
+```
+
+The transition tensor remains `(K, K-1, D)`: each source row uses its own
+self-transition as the implicit zero reference, and explicit target entries
+follow internal state order with the source omitted. In this example, row 1
+controls Disengaged → Engaged. Freezing only `drug_x_cumulative_reward` in
+row 1 leaves that interaction free for Engaged → Disengaged. With more than
+two states, a `(state, feature)` restriction fixes **all non-self targets**
+for that feature in the source row. It does not freeze transition biases,
+other features, or other source rows. Emission freezes similarly fix all
+explicit choice classes for the selected state and feature.
+
+For direct `SoftmaxGLMHMM` construction, pass the same freeze dictionaries and
+`emission_feature_names=names["X_cols"]`,
+`transition_feature_names=names["U_cols"]`. The transition component
+`InputDrivenSoftmaxTransitions` accepts `frozen_transitions` and
+`transition_feature_names` too. Direct initialization supports
+`transition_weights` and `transition_bias`; component initialization uses
+`weights` and `bias`. Supplied weights, random initialization, and EM warm
+starts are projected onto the restrictions. The loss and regularization use
+the restricted weights, their frozen gradients are zero, and fixed values
+remain exact in the tensor dtype after every optimizer step, including values
+outside the usual clipping range. This is a constrained fit, not a post-fit
+ablation. `U[t]` continues to determine the transition **into** trial `t`.
+
+The array API applies both options to every cross-validation fit and the final
+full-data fit; the normalized specification is in `fit.frozen_transitions`.
+If semantic state identification or regressor scaling must differ by fold,
+construct each training fold, its base fit, and its restrictions externally,
+then call the fitting API separately for that fold. Interactions, cumulative
+or filtered rewards, and two-step `drug_z` normalization are prepared by the
+analysis project (normalization from training data per fold); the library
+treats the supplied columns as ordinary numeric regressors.
+
+The task-aware GLM-HMM-T CLI accepts JSON with the same syntax:
+
+```bash
+python -m glmhmmt.cli.fit_glmhmmt --K 2 \
+  --frozen_emissions '{"1":{"drug_x_choice_lag_param":0.0}}' \
+  --frozen_transitions '{"1":{"Drug":0.0,"drug_x_cumulative_reward":0.0}}'
+```
+
+The named columns must already be supplied by the calling analysis or its
+design-matrix provider. No task adapter generates interactions for this option.
+The CLI propagates freezes to ordinary and CV fits, saves them in `config.json`
+and as `frozen_transitions_json` in result archives, and excludes frozen
+weights from the BIC parameter count. The model manager preserves the option
+when loading and saving configurations. Configurations use JSON string keys:
+
+```json
+{
+  "frozen_emissions": {"1": {"drug_x_choice_lag_param": 0.0}},
+  "frozen_transitions": {"1": {"Drug": 0.0, "drug_x_cumulative_reward": 0.0}}
+}
+```
+
 ## Direct Model Use
 
 See [`examples/use_softmax_glmhmm.py`](examples/use_softmax_glmhmm.py) for a minimal example that builds the model directly from arrays, without any task adapter.

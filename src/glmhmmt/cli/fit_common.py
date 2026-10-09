@@ -47,9 +47,10 @@ def stable_model_id(
     baseline_class_idx: int = 0,
     cv_mode: str = "none",
     cv_repeats: int = 0,
+    frozen_transitions: dict | None = None,
 ) -> str:
     """Stable 8-char MD5 hash over the fit-defining model configuration."""
-    from glmhmmt.model import serialize_frozen_emissions
+    from glmhmmt.model import serialize_frozen_emissions, serialize_frozen_transitions
 
     cv_mode = normalize_cv_mode(cv_mode)
     cv_repeats = int(cv_repeats) if cv_mode != "none" else 0
@@ -64,6 +65,10 @@ def stable_model_id(
         "cv_mode": cv_mode,
         "cv_repeats": cv_repeats,
     }
+    # Keep existing identifiers for unrestricted models.
+    transition_spec = serialize_frozen_transitions(frozen_transitions)
+    if transition_spec:
+        config["frozen_transitions"] = transition_spec
     return hashlib.md5(json.dumps(config, sort_keys=True).encode()).hexdigest()[:8]
 
 

@@ -17,7 +17,11 @@ import anywidget
 import polars as pl
 import traitlets
 
-from glmhmmt.model import prune_frozen_emissions, serialize_frozen_emissions
+from glmhmmt.model import (
+    prune_frozen_emissions,
+    serialize_frozen_emissions,
+    serialize_frozen_transitions,
+)
 from glmhmmt.notebook_support.analysis_common import (
     load_model_config,
     model_aliases_for_kind,
@@ -199,6 +203,7 @@ class model_cfg:
     state_split_feature: str = ""
     state_split_rule: str = "+"
     run_fit_clicks: int = 0
+    frozen_transitions: dict[str, Any] = field(default_factory=dict)
 
     @property
     def lapse(self) -> bool:
@@ -223,6 +228,7 @@ class model_cfg:
             emission_cols=list(value.get("emission_cols", [])),
             transition_cols=list(value.get("transition_cols", [])),
             frozen_emissions=serialize_frozen_emissions(value.get("frozen_emissions", {})),
+            frozen_transitions=serialize_frozen_transitions(value.get("frozen_transitions", {})),
             state_scoring_feature=str(value.get("state_scoring_feature", "")),
             state_scoring_rule=str(value.get("state_scoring_rule", "+")),
             state_split_feature=str(value.get("state_split_feature", "")),
@@ -278,6 +284,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
     transition_cols_options = traitlets.List(traitlets.Unicode()).tag(sync=True)
     transition_cols         = traitlets.List(traitlets.Unicode()).tag(sync=True)
     transition_groups       = traitlets.List(traitlets.Dict()).tag(sync=True)
+    frozen_transitions      = traitlets.Dict(default_value={}).tag(sync=True)
 
     state_scoring_feature = traitlets.Unicode("").tag(sync=True)
     state_scoring_rule = traitlets.Unicode("+").tag(sync=True)
@@ -319,6 +326,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
                 "emission_cols": list(self.emission_cols),
                 "transition_cols": list(self.transition_cols),
                 "frozen_emissions": serialize_frozen_emissions(self.frozen_emissions),
+                "frozen_transitions": serialize_frozen_transitions(self.frozen_transitions),
                 "state_scoring_feature": self.state_scoring_feature,
                 "state_scoring_rule": self.state_scoring_rule,
                 "state_split_feature": self.state_split_feature,
@@ -337,6 +345,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         self.emission_cols = []
         self.transition_cols = []
         self.frozen_emissions = {}
+        self.frozen_transitions = {}
         self.alias_error = ""
         self.alias_status = ""
         self.saved_model_name = ""
@@ -353,6 +362,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         self.saved_model_name = ""
         self.alias = ""
         self.frozen_emissions = {}
+        self.frozen_transitions = {}
         if self.model_type == "glmhmmt":
             self.condition_filter = "all"
         self._update_options()
@@ -445,6 +455,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
         if isinstance(k, int):
             self.K = k
         self.frozen_emissions = serialize_frozen_emissions(cfg.get("frozen_emissions", {}))
+        self.frozen_transitions = serialize_frozen_transitions(cfg.get("frozen_transitions", {}))
         if "lapse_mode" in cfg:
             self.lapse_mode = str(cfg["lapse_mode"])
         if "lapse_max" in cfg:
@@ -488,6 +499,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
             self.transition_cols_options = adapter.available_transition_cols()
             self.transition_cols = adapter.default_transition_cols()
             self.frozen_emissions = {}
+            self.frozen_transitions = {}
             self.alias = ""
             self.saved_model_name = ""
             self.alias_error = ""
@@ -555,6 +567,7 @@ class ModelManagerWidget(anywidget.AnyWidget):
             cfg["frozen_emissions"] = serialize_frozen_emissions(self.frozen_emissions)
         if self.model_type == "glmhmmt":
             cfg["transition_cols"] = list(self.transition_cols)
+            cfg["frozen_transitions"] = serialize_frozen_transitions(self.frozen_transitions)
         return cfg
 
     def _saved_config_matches_current(self, model_dir: Path) -> bool:
@@ -603,7 +616,11 @@ class ModelManagerWidget(anywidget.AnyWidget):
             return False
 
         if self.model_type == "glmhmmt":
-            return saved.get("transition_cols", []) == list(self.transition_cols)
+            return (
+                saved.get("transition_cols", []) == list(self.transition_cols)
+                and serialize_frozen_transitions(saved.get("frozen_transitions", {}))
+                == serialize_frozen_transitions(self.frozen_transitions)
+            )
 
         return True
 

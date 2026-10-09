@@ -48,7 +48,7 @@ notebooks = [
 [project.scripts]
 glmhmmt-fit-glm = "glmhmmt.cli.fit_glm:main"
 glmhmmt-fit-glmhmm = "glmhmmt.cli.fit_glmhmm:main"
-glmhmmt-fit-glmhmmt = "glmhmmt.cli.fit_glmhmmt:main"
+glmhmmt-fit-glmhmmt = "glmhmmt.cli.fit_glmhmmt:cli_main"
 glmhmmt-fit-tau-sweep = "glmhmmt.cli.fit_tau_sweep:main"
 glmhmmt-fit-choice-lag-tau = "glmhmmt.cli.fit_choice_lag_tau:main"
 glmhmmt-init-config = "glmhmmt.cli.init_config:main"

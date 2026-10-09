@@ -21,7 +21,13 @@ from glmhmmt.cli.fit_common import (
     score_split,
     stable_model_id,
 )
-from glmhmmt.model import SoftmaxGLMHMM, normalize_frozen_emissions, serialize_frozen_emissions
+from glmhmmt.model import (
+    SoftmaxGLMHMM,
+    normalize_frozen_emissions,
+    serialize_frozen_emissions,
+    normalize_frozen_transitions,
+    serialize_frozen_transitions,
+)
 from glmhmmt.runtime import (
     add_runtime_path_args,
     configure_paths_from_args,
@@ -42,6 +48,7 @@ def generate_model_id(
     baseline_class_idx: int = 0,
     cv_mode: str = "none",
     cv_repeats: int = 0,
+    frozen_transitions: dict | None = None,
 ) -> str:
     """Stable 8-char hash over the GLMHMMT-defining model configuration."""
     return stable_model_id(
@@ -51,6 +58,7 @@ def generate_model_id(
         emission_cols=emission_cols,
         transition_cols=transition_cols,
         frozen_emissions=frozen_emissions,
+        frozen_transitions=frozen_transitions,
         baseline_class_idx=baseline_class_idx,
         cv_mode=cv_mode,
         cv_repeats=cv_repeats,
@@ -109,6 +117,7 @@ def _build_model(
     frozen: dict | None,
     names: dict[str, Any],
     baseline_class_idx: int = 0,
+    frozen_transitions: dict[int | str, dict[str, float]] | None = None,
 ) -> SoftmaxGLMHMM:
     return SoftmaxGLMHMM(
         num_states=K,
@@ -119,6 +128,8 @@ def _build_model(
         transition_matrix_stickiness=stickiness,
         frozen_emissions=frozen or None,
         emission_feature_names=names.get("X_cols", []),
+        frozen_transitions=frozen_transitions,
+        transition_feature_names=names.get("U_cols", []),
         baseline_class_idx=baseline_class_idx,
     )
 
@@ -137,6 +148,16 @@ def _count_free_params(result: dict) -> int:
     transition_params = K * (K - 1)
     if u_dim > 0:
         transition_params += K * (K - 1) * u_dim
+
+    frozen_transitions = normalize_frozen_transitions(result.get("frozen_transitions", {}))
+    u_cols = set(result.get("names", {}).get("U_cols", []))
+    transition_params -= (K - 1) * sum(
+        1
+        for state_idx, feature_map in frozen_transitions.items()
+        if 0 <= state_idx < K
+        for feature_name in feature_map
+        if feature_name in u_cols
+    )
 
     frozen = normalize_frozen_emissions(result.get("frozen_emissions", {}))
     x_cols = [str(col) for col in result.get("names", {}).get("X_cols", [])]
@@ -181,6 +202,7 @@ def fit_subject(
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
+    frozen_transitions: dict[int | str, dict[str, float]] | None = None,
 ) -> dict:
     adapter, feature_df = _load_subject_feature_df(subject, task, tau, emission_cols=emission_cols, transition_cols=transition_cols)
     y, X, U, session_ids, names = _prepare_arrays(
@@ -191,6 +213,7 @@ def fit_subject(
         adapter.session_col,
     )
     frozen = normalize_frozen_emissions(frozen_emissions)
+    frozen_transition_spec = normalize_frozen_transitions(frozen_transitions)
     inputs_all = jnp.concatenate([X, U], axis=1)
     model = _build_model(
         K,
@@ -202,6 +225,7 @@ def fit_subject(
         frozen,
         names,
         baseline_class_idx=baseline_class_idx,
+        frozen_transitions=frozen_transition_spec,
     )
     best_params, best_lps, best_restart = fit_best_restart(
         model,
@@ -251,6 +275,7 @@ def fit_subject(
         "X": np.asarray(X),
         "U": np.asarray(U),
         "frozen_emissions": serialize_frozen_emissions(frozen),
+        "frozen_transitions": serialize_frozen_transitions(frozen_transition_spec),
         "baseline_class_idx": int(baseline_class_idx),
         "transition_weight_baseline_idx": -1,
         "cv_mode": "none",
@@ -275,9 +300,11 @@ def fit_subject_cv(
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
+    frozen_transitions: dict[int | str, dict[str, float]] | None = None,
 ) -> dict:
     adapter, feature_df = _load_subject_feature_df(subject, task, tau, emission_cols=emission_cols, transition_cols=transition_cols)
     frozen = normalize_frozen_emissions(frozen_emissions)
+    frozen_transition_spec = normalize_frozen_transitions(frozen_transitions)
     repeats: list[dict[str, Any]] = []
     best_repeat_idx = -1
     best_test_ll = -np.inf
@@ -336,6 +363,7 @@ def fit_subject_cv(
             frozen,
             names,
             baseline_class_idx=baseline_class_idx,
+            frozen_transitions=frozen_transition_spec,
         )
         best_params, best_lps, best_restart = fit_best_restart(
             model,
@@ -456,6 +484,7 @@ def fit_subject_cv(
         "X": np.asarray(X_full),
         "U": np.asarray(U_full),
         "frozen_emissions": serialize_frozen_emissions(frozen),
+        "frozen_transitions": serialize_frozen_transitions(frozen_transition_spec),
         "baseline_class_idx": int(baseline_class_idx),
         "transition_weight_baseline_idx": -1,
         "cv_mode": "balanced_session_holdout",
@@ -508,6 +537,7 @@ def save_results(result: dict, out_dir: Path) -> None:
         X_cols=np.array(result["names"].get("X_cols", []), dtype=object),
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
+        frozen_transitions_json=np.array(json.dumps(result.get("frozen_transitions", {}), sort_keys=True)),
         baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
         transition_weight_baseline_idx=np.array(int(result.get("transition_weight_baseline_idx", -1))),
     )
@@ -572,6 +602,7 @@ def save_cv_results(result: dict, out_dir: Path) -> None:
         X_cols=np.array(result["names"].get("X_cols", []), dtype=object),
         U_cols=np.array(result["names"].get("U_cols", []), dtype=object),
         frozen_emissions_json=np.array(json.dumps(result["frozen_emissions"], sort_keys=True)),
+        frozen_transitions_json=np.array(json.dumps(result.get("frozen_transitions", {}), sort_keys=True)),
         baseline_class_idx=np.array(int(result.get("baseline_class_idx", 0))),
         transition_weight_baseline_idx=np.array(int(result.get("transition_weight_baseline_idx", -1))),
         cv_selected_repeat=np.array(int(result["best_repeat_index"])),
@@ -596,11 +627,13 @@ def main(
     verbose: bool = True,
     progress_callback: ProgressCallback | None = None,
     baseline_class_idx: int = 0,
+    frozen_transitions: dict[int | str, dict[str, float]] | None = None,
 ):
     adapter = get_adapter(task)
     cv_mode = normalize_cv_mode(cv_mode)
     cv_repeats = int(cv_repeats) if cv_mode != "none" else 0
     frozen_spec = serialize_frozen_emissions(frozen_emissions)
+    frozen_transition_spec = serialize_frozen_transitions(frozen_transitions)
     df = None
     if emission_cols is None or subjects is None:
         df = adapter.read_dataset()
@@ -614,6 +647,7 @@ def main(
             emission_cols=resolved_emission_cols,
             transition_cols=transition_cols or adapter.default_transition_cols(),
             frozen_emissions=frozen_spec,
+            frozen_transitions=frozen_transition_spec,
             baseline_class_idx=baseline_class_idx,
             cv_mode=cv_mode,
             cv_repeats=cv_repeats,
@@ -629,6 +663,7 @@ def main(
                 "emission_cols": resolved_emission_cols,
                 "transition_cols": transition_cols or adapter.default_transition_cols(),
                 "frozen_emissions": frozen_spec,
+                "frozen_transitions": frozen_transition_spec,
                 "baseline_class_idx": int(baseline_class_idx),
                 "K_list": K_list,
                 "model_id": out_dir.name,
@@ -676,6 +711,7 @@ def main(
                     emission_cols=resolved_emission_cols,
                     transition_cols=transition_cols,
                     frozen_emissions=frozen_spec,
+                    frozen_transitions=frozen_transition_spec,
                     baseline_class_idx=baseline_class_idx,
                     tau=tau,
                     task=task,
@@ -693,6 +729,7 @@ def main(
                     emission_cols=resolved_emission_cols,
                     transition_cols=transition_cols,
                     frozen_emissions=frozen_spec,
+                    frozen_transitions=frozen_transition_spec,
                     baseline_class_idx=baseline_class_idx,
                     tau=tau,
                     task=task,
@@ -704,7 +741,8 @@ def main(
                 print(f"  ✓ saved to {out_dir}")
 
 
-if __name__ == "__main__":
+def cli_main(argv: list[str] | None = None) -> None:
+    """Parse CLI arguments while retaining ``main`` for notebook callers."""
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -736,9 +774,16 @@ if __name__ == "__main__":
         default=0,
         help="Choice class used as the implicit softmax reference.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--frozen_transitions",
+        type=str,
+        default=None,
+        help='JSON object mapping source states to {U_feature: fixed_value}.',
+    )
+    args = parser.parse_args(argv)
     configure_paths_from_args(args)
     frozen_emissions = json.loads(args.frozen_emissions) if args.frozen_emissions else None
+    frozen_transitions = json.loads(args.frozen_transitions) if args.frozen_transitions else None
     main(
         subjects=args.subjects,
         K_list=args.K,
@@ -749,9 +794,14 @@ if __name__ == "__main__":
         emission_cols=None,
         transition_cols=None,
         frozen_emissions=frozen_emissions,
+        frozen_transitions=frozen_transitions,
         tau=args.tau,
         task=args.task,
         cv_mode=args.cv_mode,
         cv_repeats=args.cv_repeats,
         baseline_class_idx=args.baseline_class_idx,
     )
+
+
+if __name__ == "__main__":
+    cli_main()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Integral
 from typing import Any, Callable
 
@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from glmhmmt._fit_utils import fit_best_restart, restore_trial_order, score_split
-from glmhmmt.model import SoftmaxGLMHMM, normalize_frozen_emissions
+from glmhmmt.model import SoftmaxGLMHMM, normalize_frozen_emissions, normalize_frozen_transitions
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -64,6 +64,7 @@ class FitResult:
     frozen_emissions: dict[int, dict[str, float]]
 
     cv_metrics: list[CVFoldResult]
+    frozen_transitions: dict[int, dict[str, float]] = field(default_factory=dict)
 
 
 @dataclass
@@ -135,6 +136,7 @@ def _validate_inputs(
     transition_names: list[str] | None,
     baseline_class_idx: int,
     frozen_emissions: dict[int, dict[str, float]] | None,
+    frozen_transitions: dict[int | str, dict[str, float]] | None,
     num_iters: int,
     m_step_num_iters: int,
     n_restarts: int,
@@ -148,6 +150,7 @@ def _validate_inputs(
     np.ndarray,
     list[str],
     list[str],
+    dict[int, dict[str, float]],
     dict[int, dict[str, float]],
     np.ndarray,
 ]:
@@ -288,6 +291,21 @@ def _validate_inputs(
                 f"{unknown_features}."
             )
 
+    if frozen_transitions is not None and not isinstance(frozen_transitions, dict):
+        raise ValueError("frozen_transitions must be a dictionary or None.")
+    frozen_transition_spec = normalize_frozen_transitions(frozen_transitions)
+    for state_index, feature_map in frozen_transition_spec.items():
+        if not 0 <= state_index < num_states:
+            raise ValueError(
+                f"Frozen transition state index {state_index} is outside [0, {num_states - 1}]."
+            )
+        unknown_features = sorted(set(feature_map) - set(resolved_transition_names))
+        if unknown_features:
+            raise ValueError(
+                "Frozen transition features must appear in transition_names; unknown features: "
+                f"{unknown_features}."
+            )
+
     return (
         y_array,
         X_array,
@@ -296,6 +314,7 @@ def _validate_inputs(
         resolved_emission_names,
         resolved_transition_names,
         frozen,
+        frozen_transition_spec,
         ordered_sessions,
     )
 
@@ -309,8 +328,10 @@ def _fit_arrays(
     num_states: int,
     num_classes: int,
     emission_names: list[str],
+    transition_names: list[str],
     baseline_class_idx: int,
     frozen_emissions: dict[int, dict[str, float]],
+    frozen_transitions: dict[int, dict[str, float]],
     num_iters: int,
     m_step_num_iters: int,
     n_restarts: int,
@@ -329,6 +350,8 @@ def _fit_arrays(
         transition_matrix_stickiness=stickiness,
         frozen_emissions=frozen_emissions or None,
         emission_feature_names=emission_names,
+        frozen_transitions=frozen_transitions or None,
+        transition_feature_names=transition_names,
         baseline_class_idx=baseline_class_idx,
     )
     y_jax = jnp.asarray(y)
@@ -393,6 +416,7 @@ def fit_glmhmm(
     transition_names: list[str] | None = None,
     baseline_class_idx: int = 0,
     frozen_emissions: dict[int, dict[str, float]] | None = None,
+    frozen_transitions: dict[int | str, dict[str, float]] | None = None,
     num_iters: int = 50,
     m_step_num_iters: int = 100,
     n_restarts: int = 5,
@@ -407,6 +431,14 @@ def fit_glmhmm(
     Choices must already be integer encoded. ``X`` and optional ``U`` must
     already contain the desired emission and transition regressors. No data is
     loaded, transformed, filtered, or persisted by this function.
+
+    ``frozen_emissions`` and ``frozen_transitions`` accept
+    ``{state_index: {feature_name: fixed_value}}``, including JSON string state
+    keys. Names are resolved in ``emission_names`` / ``transition_names`` order.
+    Transition freezes constrain every non-self target for that source row;
+    biases and other weights stay free. They apply to each CV fit and the full
+    fit. ``U[t]`` determines the transition into trial ``t``. Interaction
+    columns and any fold-specific normalization must be prepared by the caller.
     """
     (
         y_array,
@@ -416,6 +448,7 @@ def fit_glmhmm(
         resolved_emission_names,
         resolved_transition_names,
         frozen,
+        frozen_transition_spec,
         ordered_sessions,
     ) = _validate_inputs(
         y,
@@ -428,6 +461,7 @@ def fit_glmhmm(
         transition_names=transition_names,
         baseline_class_idx=baseline_class_idx,
         frozen_emissions=frozen_emissions,
+        frozen_transitions=frozen_transitions,
         num_iters=num_iters,
         m_step_num_iters=m_step_num_iters,
         n_restarts=n_restarts,
@@ -460,8 +494,10 @@ def fit_glmhmm(
                 num_states=num_states,
                 num_classes=num_classes,
                 emission_names=resolved_emission_names,
+                transition_names=resolved_transition_names,
                 baseline_class_idx=baseline_class_idx,
                 frozen_emissions=frozen,
+                frozen_transitions=frozen_transition_spec,
                 num_iters=num_iters,
                 m_step_num_iters=m_step_num_iters,
                 n_restarts=n_restarts,
@@ -516,8 +552,10 @@ def fit_glmhmm(
         num_states=num_states,
         num_classes=num_classes,
         emission_names=resolved_emission_names,
+        transition_names=resolved_transition_names,
         baseline_class_idx=baseline_class_idx,
         frozen_emissions=frozen,
+        frozen_transitions=frozen_transition_spec,
         num_iters=num_iters,
         m_step_num_iters=m_step_num_iters,
         n_restarts=n_restarts,
@@ -549,6 +587,7 @@ def fit_glmhmm(
         num_classes=int(num_classes),
         baseline_class_idx=int(baseline_class_idx),
         frozen_emissions=frozen,
+        frozen_transitions=frozen_transition_spec,
         cv_metrics=cv_metrics,
     )
 

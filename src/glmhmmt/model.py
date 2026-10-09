@@ -19,7 +19,7 @@ from dynamax.parameters import ParameterProperties
 from dynamax.hidden_markov_model.models.abstractions import HMM, HMMEmissions, HMMParameterSet, HMMPropertySet
 
 
-def normalize_frozen_emissions(frozen: Any) -> dict[int, dict[str, float]]:
+def _normalize_frozen(frozen: Any, component: str) -> dict[int, dict[str, float]]:
     """Normalize a raw freeze mapping into ``{int_state: {feature: float}}``."""
     if not isinstance(frozen, dict):
         return {}
@@ -29,14 +29,14 @@ def normalize_frozen_emissions(frozen: Any) -> dict[int, dict[str, float]]:
         try:
             state = int(raw_state)
         except (TypeError, ValueError):
-            raise ValueError(f"Invalid state index {raw_state!r} in frozen emissions; must be an integer.")
+            raise ValueError(f"Invalid state index {raw_state!r} in frozen {component}; must be an integer.")
         if not isinstance(raw_features, dict):
-            raise ValueError(f"Invalid feature map for state {state} in frozen emissions; must be a dict of {{feature_name: value}}.")
+            raise ValueError(f"Invalid feature map for state {state} in frozen {component}; must be a dict of {{feature_name: value}}.")
 
         feature_map: dict[str, float] = {}
         for feature_name, raw_value in raw_features.items():
             if not isinstance(feature_name, str):
-                raise ValueError(f"Invalid feature name {feature_name!r} for state {state} in frozen emissions; must be a string.")
+                raise ValueError(f"Invalid feature name {feature_name!r} for state {state} in frozen {component}; must be a string.")
             try:
                 value = float(raw_value)
             except (TypeError, ValueError):
@@ -49,6 +49,16 @@ def normalize_frozen_emissions(frozen: Any) -> dict[int, dict[str, float]]:
             result[state] = feature_map
 
     return result
+
+
+def normalize_frozen_emissions(frozen: Any) -> dict[int, dict[str, float]]:
+    """Normalize emission freezes, accepting integer or JSON string state keys."""
+    return _normalize_frozen(frozen, "emissions")
+
+
+def normalize_frozen_transitions(frozen: Any) -> dict[int, dict[str, float]]:
+    """Normalize transition freezes with the same syntax as emission freezes."""
+    return _normalize_frozen(frozen, "transitions")
 
 
 def serialize_frozen_emissions(frozen: Any) -> dict[str, dict[str, float]]:
@@ -80,12 +90,19 @@ def prune_frozen_emissions(
     return serialize_frozen_emissions(pruned)
 
 
+def serialize_frozen_transitions(frozen: Any) -> dict[str, dict[str, float]]:
+    """Convert transition freezes to the shared JSON-safe representation."""
+    return serialize_frozen_emissions(normalize_frozen_transitions(frozen))
+
+
 def _resolve_frozen(
     frozen: Dict[int, Dict[str, float]],
     feature_names: List[str],
     num_states: int,
     num_classes: int,
     input_dim: int,
+    *,
+    feature_names_arg: str = "emission_feature_names",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Convert a feature-name freeze spec into boolean mask and values arrays.
 
@@ -126,7 +143,7 @@ def _resolve_frozen(
         for feat_name, val in feat_dict.items():
             if feat_name not in feature_names:
                 raise ValueError(
-                    f"Feature '{feat_name}' not found in emission_feature_names.\nAvailable: {feature_names}"
+                    f"Feature '{feat_name}' not found in {feature_names_arg}.\nAvailable: {feature_names}"
                 )
             col = feature_names.index(feat_name)
             mask[state_idx, :, col] = True
@@ -140,10 +157,14 @@ def make_freeze_bijector(
     num_states: int,
     num_classes: int,
     input_dim: int,
+    *,
+    feature_names_arg: str = "emission_feature_names",
 ) -> tfb.Bijector:
     """Build a TFP bijector that freezes specific (state, feature) weight entries.
 
-    Returns a `tfb.Bijector` acting on the full weight tensor `W` of shape `(K, C-1, M)`.  Frozen entries are clamped to their fixed value on every forward pass; gradients **cannot** flow through them because the log-det-Jacobian is `-inf` for those dimensions.
+    Returns a `tfb.Bijector` acting on the full weight tensor `W` of shape
+    `(K, C-1, M)`. Frozen entries are replaced by constants on every forward
+    pass, so gradients through those entries are zero.
 
     The bijector is passed as `ParameterProperties(constrainer=...)` so that dynamax enforces the constraint automatically inside the EM M-step.
 
@@ -158,8 +179,8 @@ def make_freeze_bijector(
 
     Returns:
         A `tfb.Bijector` whose `_forward` replaces frozen entries with
-        their fixed values and whose `_forward_log_det_jacobian` returns
-        `-inf` for frozen dimensions (blocking gradient flow).
+        their fixed values (blocking gradient flow). Its
+        `_forward_log_det_jacobian` returns `-inf` for frozen dimensions.
 
     Note:
         The bijector operates on the **entire** `(K, C-1, M)` tensor in one
@@ -177,7 +198,10 @@ def make_freeze_bijector(
         props = ParameterProperties(constrainer=bij)
         ```
     """
-    mask, values = _resolve_frozen(frozen, feature_names, num_states, num_classes, input_dim)
+    mask, values = _resolve_frozen(
+        frozen, feature_names, num_states, num_classes, input_dim,
+        feature_names_arg=feature_names_arg,
+    )
     mask_jnp = jnp.array(mask)
     values_jnp = jnp.array(values)
     ndims = len(mask.shape)
@@ -288,7 +312,7 @@ class SoftmaxGLMHMMEmissions(HMMEmissions):
         self.input_dim = input_dim
         self.emission_input_dim = emission_input_dim
         self.weight_scale = weight_scale
-        self.frozen = frozen or {}
+        self.frozen = normalize_frozen_emissions(frozen)
         self.emission_feature_names = emission_feature_names or []
         self.baseline_class_idx = int(baseline_class_idx)
         if not 0 <= self.baseline_class_idx < self.num_classes:
@@ -420,6 +444,12 @@ class ParamsInputDrivenTransitions(NamedTuple):
 
 
 class InputDrivenSoftmaxTransitions(HMMTransitions):
+    """Softmax transitions with each source row's self edge as reference.
+
+    ``frozen_transitions={state: {feature: value}}`` fixes every non-self
+    contrast for that feature in the source row. Feature names follow the
+    columns of ``U`` (``names['U_cols']``). Biases are unaffected.
+    """
     def __init__(
         self,
         num_states: int,
@@ -429,6 +459,8 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         stickiness: float = 10.0,
         m_step_optimizer=optax.adam(1e-2),
         m_step_num_iters=50,
+        frozen_transitions: Optional[Dict[Union[int, str], Dict[str, float]]] = None,
+        transition_feature_names: Optional[List[str]] = None,
     ):
         super().__init__(m_step_optimizer=m_step_optimizer, m_step_num_iters=m_step_num_iters)
         self.num_states = num_states
@@ -436,6 +468,25 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         self.transition_input_dim = transition_input_dim
         self.weight_scale = weight_scale
         self.stickiness = stickiness
+        self.frozen_transitions = normalize_frozen_transitions(frozen_transitions)
+        self.transition_feature_names = transition_feature_names or []
+        self._weight_constrainer = None
+        if self.frozen_transitions:
+            if len(self.transition_feature_names) != transition_input_dim:
+                raise ValueError(
+                    "transition_feature_names must match the columns of U when "
+                    "frozen_transitions is set. Pass names['U_cols']."
+                )
+            if len(set(self.transition_feature_names)) != transition_input_dim:
+                raise ValueError("transition_feature_names must not contain duplicate names.")
+            for state in self.frozen_transitions:
+                if not 0 <= state < num_states:
+                    raise ValueError(f"Frozen transition state index {state} is outside [0, {num_states - 1}].")
+            self._weight_constrainer = make_freeze_bijector(
+                self.frozen_transitions, self.transition_feature_names,
+                num_states, num_states, transition_input_dim,
+                feature_names_arg="transition_feature_names",
+            )
         nonself_targets = np.asarray(
             [[j for j in range(num_states) if j != i] for i in range(num_states)],
             dtype=np.int32,
@@ -446,6 +497,12 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
     def _expand_bias(self, bias):
         full = jnp.zeros((self.num_states, self.num_states), dtype=bias.dtype)
         return full.at[self._source_idx, self._nonself_target_idx].set(bias)
+
+    def constrain_weights(self, weights):
+        """Project weights for initialization, inference, and warm starts."""
+        if self._weight_constrainer is None:
+            return weights
+        return self._weight_constrainer.forward(weights)
 
     def _expand_weights(self, weights):
         full = jnp.zeros(
@@ -511,21 +568,25 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             if weights is None
             else self._coerce_weights(weights, jnp.float32)
         )
+        W = self.constrain_weights(W)
 
         params = ParamsInputDrivenTransitions(bias=b, weights=W)
-        props = ParamsInputDrivenTransitions(bias=ParameterProperties(), weights=ParameterProperties())
+        props = ParamsInputDrivenTransitions(
+            bias=ParameterProperties(),
+            weights=ParameterProperties(constrainer=self._weight_constrainer),
+        )
         return params, props
 
     def log_prior(self, params):
         l2_bias = 1e-3
         l2_w = 1e-3
-        return -(l2_bias * jnp.sum(params.bias**2) + l2_w * jnp.sum(params.weights**2))
+        return -(l2_bias * jnp.sum(params.bias**2) + l2_w * jnp.sum(self.constrain_weights(params.weights)**2))
 
     def distribution(self, params, state, inputs=None):
         u = inputs[self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]
         i = jnp.asarray(state, jnp.int32)
         bias_full = self._expand_bias(params.bias)
-        weights_full = self._expand_weights(params.weights)
+        weights_full = self._expand_weights(self.constrain_weights(params.weights))
         logits = bias_full[i] + jnp.einsum("jd,d->j", weights_full[i], u)
         return tfd.Categorical(logits=logits)
 
@@ -540,7 +601,7 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
         # u_{t+1} is used for transition t -> t+1, matching Dynamax.
         u = inputs[1:, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (T-1, D)
         bias_full = self._expand_bias(params.bias)
-        weights_full = self._expand_weights(params.weights)
+        weights_full = self._expand_weights(self.constrain_weights(params.weights))
         logits = bias_full[None, :, :] + jnp.einsum("ijd,td->tij", weights_full, u)  # (T-1,K,K)
         return jax.nn.softmax(logits, axis=-1)
 
@@ -564,11 +625,25 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
 
         u = inputs_tr[:, self.emission_input_dim : self.emission_input_dim + self.transition_input_dim]  # (N,D)
 
-        b0, W0 = params.bias, params.weights
+        # Unlike Dynamax's generic M-step, this optimizer works directly on
+        # (bias, weights). Apply the shared emission bijector inside the loss
+        # so both likelihood and regularization have zero frozen gradients.
+        # Warm starts may carry properties from an unrestricted base model.
+        constrainer = (
+            self._weight_constrainer
+            if self._weight_constrainer is not None
+            else props.weights.constrainer
+        )
+
+        def constrain(W):
+            return W if constrainer is None else constrainer.forward(W)
+
+        b0, W0 = params.bias, constrain(params.weights)
         l2 = 1e-3
         clip_val = 20.0
 
         def loss_fn(b, W):
+            W = constrain(W)
             # logits[n,i,j] = b[i,j] + sum_d W[i,j,d] u[n,d]
             b_full = self._expand_bias(b)
             W_full = self._expand_weights(W)
@@ -587,11 +662,11 @@ class InputDrivenSoftmaxTransitions(HMMTransitions):
             updates, opt_state = opt.update(grads, opt_state, (b, W))
             b, W = optax.apply_updates((b, W), updates)
             b = jnp.clip(b, -clip_val, clip_val)
-            W = jnp.clip(W, -clip_val, clip_val)
+            W = constrain(jnp.clip(W, -clip_val, clip_val))
             return (b, W, opt_state), loss
 
         (b, W, _), _ = jax.lax.scan(step, (b0, W0, opt_state), None, length=self.m_step_num_iters)
-        return ParamsInputDrivenTransitions(bias=b, weights=W), m_step_state
+        return ParamsInputDrivenTransitions(bias=b, weights=constrain(W)), m_step_state
 
 
 class ParamsSoftmaxGLMHMM(NamedTuple):
@@ -624,6 +699,14 @@ class SoftmaxGLMHMM(HMM):
         weight_scale: Standard deviation of the random normal weight initialisation for emission and transition weights.  Default `1.0`.
         frozen_emissions: Per-state emission feature freeze specification of the form `{state_idx: {feature_name: fixed_value}}`.  Feature names must appear in `emission_feature_names`; frozen entries are enforced by a bijector so they receive no gradient updates. Example: `{0: {"SL": 0.0, "SC": 0.0, "SR": 0.0}}`.
         emission_feature_names: Ordered names of the `X` columns — pass `names["X_cols"]` from the adapter design-matrix build. **Required** when `frozen_emissions` is set.
+        frozen_transitions: Per-source-state transition feature freezes, e.g.
+            `{1: {"Drug": 0.0, "drug_x_cumulative_reward": 0.0}}`. Each entry
+            fixes all non-self targets in that row of the compact `(K, K-1, D)`
+            tensor, relative to the self edge. Biases remain free. State indices
+            are internal model indices, without semantic labels.
+        transition_feature_names: Ordered `U` column names (`names["U_cols"]`).
+            Required when `frozen_transitions` is set. Integer state keys and
+            their JSON string equivalents are accepted by both freeze options.
         baseline_class_idx: Class index used as the softmax reference category.
             Its logit is fixed to zero and no explicit weight row is learned
             for it. Explicit weight rows follow class-index order with this
@@ -685,6 +768,8 @@ class SoftmaxGLMHMM(HMM):
         baseline_class_idx: int = 0,
         m_step_optimizer: optax.GradientTransformation = optax.adam(1e-2),
         m_step_num_iters: int = 100,
+        frozen_transitions: Optional[Dict[Union[int, str], Dict[str, float]]] = None,
+        transition_feature_names: Optional[List[str]] = None,
     ):
 
         self.inputs_dim = emission_input_dim + transition_input_dim
@@ -701,6 +786,8 @@ class SoftmaxGLMHMM(HMM):
 
         initial_component = StandardHMMInitialState(num_states, initial_probs_concentration=initial_probs_concentration)
 
+        if normalize_frozen_transitions(frozen_transitions) and transition_input_dim == 0:
+            raise ValueError("frozen_transitions requires transition regressors in U.")
         if transition_input_dim > 0:
             transition_component = InputDrivenSoftmaxTransitions(
                 num_states=num_states,
@@ -710,6 +797,8 @@ class SoftmaxGLMHMM(HMM):
                 stickiness=transition_matrix_stickiness,
                 m_step_optimizer=m_step_optimizer,
                 m_step_num_iters=m_step_num_iters,
+                frozen_transitions=frozen_transitions,
+                transition_feature_names=transition_feature_names,
             )
         else:
             transition_component = StandardHMMTransitions(
@@ -777,6 +866,8 @@ class SoftmaxGLMHMM(HMM):
         initial_probs: Optional[Float[Array, " num_states"]] = None,
         transition_matrix: Optional[Float[Array, "num_states num_states"]] = None,
         emission_weights: Optional[Float[Array, "num_states num_classes input_dim"]] = None,
+        transition_bias=None,
+        transition_weights=None,
     ) -> Tuple[HMMParameterSet, HMMPropertySet]:
         """Initialise all model parameters and their properties.
 
@@ -790,6 +881,10 @@ class SoftmaxGLMHMM(HMM):
                 `(K, K)`.  Ignored when using input-driven transitions.
             emission_weights: Optional fixed emission weights of shape
                 `(K, C-1, M)`.
+            transition_bias: Optional non-self transition biases `(K, K-1)`.
+            transition_weights: Optional transition weights `(K, K-1, D)`.
+                Legacy full and target-only tensors are converted to the
+                self reference before applying any freezes.
 
         Returns:
             Tuple `(params, props)` of `ParamsSoftmaxGLMHMM` NamedTuples.
@@ -802,7 +897,9 @@ class SoftmaxGLMHMM(HMM):
         )
 
         if self.transition_input_dim > 0:
-            params["transitions"], props["transitions"] = self.transition_component.initialize(key2, method=method)
+            params["transitions"], props["transitions"] = self.transition_component.initialize(
+                key2, method=method, bias=transition_bias, weights=transition_weights,
+            )
         else:
             params["transitions"], props["transitions"] = self.transition_component.initialize(
                 key2, method=method, transition_matrix=transition_matrix
@@ -813,6 +910,20 @@ class SoftmaxGLMHMM(HMM):
         )
 
         return ParamsSoftmaxGLMHMM(**params), ParamsSoftmaxGLMHMM(**props)
+
+    def _constrain_transition_params(self, params):
+        if self.transition_input_dim > 0:
+            params = params._replace(transitions=params.transitions._replace(
+                weights=self.transition_component.constrain_weights(params.transitions.weights)
+            ))
+        return params
+
+    def fit_em(self, params, props, emissions, inputs=None, num_iters=50, verbose=True):
+        """Use Dynamax EM after projecting any supplied warm-start weights."""
+        return super().fit_em(
+            self._constrain_transition_params(params), props, emissions,
+            inputs=inputs, num_iters=num_iters, verbose=verbose,
+        )
 
     def predict_choice_probs(self, params, emissions, inputs):
         """Compute one-step-ahead predictive choice probabilities.
@@ -1018,6 +1129,7 @@ class SoftmaxGLMHMM(HMM):
         from tqdm.auto import trange
 
         self._validate_emissions(emissions, allow_padding=False, name="emissions")
+        params = self._constrain_transition_params(params)
         sessions = self._split_by_session(emissions, inputs, session_ids)
         e_pad, i_pad, _ = self._pad_sessions(sessions)
         m_step_state = self.initialize_m_step_state(params, props)
